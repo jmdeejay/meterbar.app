@@ -1,12 +1,11 @@
 import WidgetKit
 import SwiftUI
+import AppIntents
 
 // MARK: - Shared Types (duplicated for Widget target)
 
 enum ServiceType: String, Codable, CaseIterable, Identifiable {
-    case claude = "Claude"
     case claudeCode = "Claude Code"
-    case openai = "OpenAI"
     case codexCli = "Codex CLI"
     case cursor = "Cursor"
 
@@ -14,19 +13,46 @@ enum ServiceType: String, Codable, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .claude: return "Claude API"
         case .claudeCode: return "Claude Code"
-        case .openai: return "OpenAI"
         case .codexCli: return "OpenAI Codex"
         case .cursor: return "Cursor"
         }
     }
 
+    var compactDisplayName: String {
+        switch self {
+        case .claudeCode: return "Claude"
+        case .codexCli: return "OpenAI"
+        case .cursor: return "Cursor"
+        }
+    }
+
+    func sessionLabel(verbose: Bool) -> String {
+        switch self {
+        case .claudeCode: return verbose ? "Session (5h)" : "S"
+        case .codexCli:   return verbose ? "Session (5h)" : "S"
+        case .cursor:     return verbose ? "On-Demand" : "OD"
+        }
+    }
+
+    func weeklyLabel(verbose: Bool) -> String {
+        switch self {
+        case .claudeCode: return verbose ? "All Models (7d)" : "W"
+        case .codexCli:   return verbose ? "Weekly" : "W"
+        case .cursor:     return verbose ? "Monthly" : "M"
+        }
+    }
+
+    func codeReviewLabel(verbose: Bool) -> String {
+        switch self {
+        case .claudeCode:        return verbose ? "Sonnet (7d)" : "Sn"
+        case .codexCli, .cursor: return verbose ? "Code Review" : "CR"
+        }
+    }
+
     var iconName: String {
         switch self {
-        case .claude: return "ClaudeIcon"
         case .claudeCode: return "ClaudeIcon"
-        case .openai: return "OpenAIIcon"
         case .codexCli: return "CodexIcon"
         case .cursor: return "CursorIcon"
         }
@@ -35,10 +61,8 @@ enum ServiceType: String, Codable, CaseIterable, Identifiable {
     var sortOrder: Int {
         switch self {
         case .claudeCode: return 0
-        case .claude: return 1
-        case .codexCli: return 2
-        case .cursor: return 3
-        case .openai: return 4
+        case .codexCli: return 1
+        case .cursor: return 2
         }
     }
 }
@@ -223,6 +247,57 @@ struct UsageWidgetEntryView: View {
     }
 }
 
+
+struct WidgetRefreshButton: View {
+    var topPadding: CGFloat = 4
+    var trailingPadding: CGFloat = 4
+    var iconSize: CGFloat = 9
+
+    var body: some View {
+        Group {
+            if #available(macOS 14.0, *) {
+                Button(intent: RefreshUsageIntent()) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: iconSize, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, topPadding)
+        .padding(.trailing, trailingPadding)
+    }
+}
+
+struct ServiceMiniView: View {
+    let metrics: UsageMetrics
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Image(metrics.service.iconName)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 14, height: 14)
+                Text(metrics.service.compactDisplayName)
+                    .font(.system(size: 10, weight: .semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 2)
+                WidgetStatusIndicator(status: metrics.overallStatus)
+            }
+            if let session = metrics.sessionLimit {
+                MiniLimitRow(label: metrics.service.sessionLabel(verbose: false), limit: session, font: .system(size: 9))
+            }
+            if let weekly = metrics.weeklyLimit {
+                MiniLimitRow(label: metrics.service.weeklyLabel(verbose: false), limit: weekly, font: .system(size: 9))
+            }
+            if let codeReview = metrics.codeReviewLimit {
+                MiniLimitRow(label: metrics.service.codeReviewLabel(verbose: false), limit: codeReview, font: .system(size: 9))
+            }
+        }
+    }
+}
+
 struct SmallWidgetView: View {
     let entry: UsageWidgetEntry
 
@@ -240,32 +315,12 @@ struct SmallWidgetView: View {
                 }
             }
         }
-        .padding()
+        .padding(4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .containerBackground(.fill.tertiary, for: .widget)
-    }
-}
-
-struct ServiceMiniView: View {
-    let metrics: UsageMetrics
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(metrics.service.iconName)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 14, height: 14)
-
-            if let weeklyLimit = metrics.weeklyLimit {
-                ProgressView(value: weeklyLimit.clampedUsed, total: weeklyLimit.clampedTotal)
-                    .tint(weeklyLimit.statusColor.color)
-                Text("\(Int(weeklyLimit.percentage))%")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-
-            WidgetStatusIndicator(status: metrics.overallStatus)
+        .overlay(alignment: .topTrailing) {
+            WidgetRefreshButton(topPadding: -4, trailingPadding: -8)
         }
+        .containerBackground(.fill.tertiary, for: .widget)
     }
 }
 
@@ -273,21 +328,28 @@ struct MediumWidgetView: View {
     let entry: UsageWidgetEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        Group {
             if entry.metrics.isEmpty {
                 Text("No services connected")
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ForEach(entry.sortedServices, id: \.self) { service in
-                    if let metrics = entry.metrics[service] {
-                        ServiceCompactView(metrics: metrics)
+                HStack(alignment: .top, spacing: 10) {
+                    ForEach(entry.sortedServices.prefix(3), id: \.self) { service in
+                        if let metrics = entry.metrics[service] {
+                            ServiceColumnView(metrics: metrics)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                        }
                     }
                 }
             }
         }
-        .padding()
+        .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .overlay(alignment: .topTrailing) {
+            WidgetRefreshButton(topPadding: -8, trailingPadding: 0, iconSize: 12)
+        }
         .containerBackground(.fill.tertiary, for: .widget)
     }
 }
@@ -318,9 +380,43 @@ struct LargeWidgetView: View {
                 }
             }
         }
-        .padding()
+        .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .overlay(alignment: .topTrailing) {
+            WidgetRefreshButton(topPadding: -8, trailingPadding: 0, iconSize: 12)
+        }
         .containerBackground(.fill.tertiary, for: .widget)
+    }
+}
+
+struct ServiceColumnView: View {
+    let metrics: UsageMetrics
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Image(metrics.service.iconName)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 14, height: 14)
+                Text(metrics.service.compactDisplayName)
+                    .font(.caption2)
+                    .bold()
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 2)
+                WidgetStatusIndicator(status: metrics.overallStatus)
+            }
+            if let session = metrics.sessionLimit {
+                MiniLimitRow(label: metrics.service.sessionLabel(verbose: false), limit: session, font: .system(size: 9))
+            }
+            if let weekly = metrics.weeklyLimit {
+                MiniLimitRow(label: metrics.service.weeklyLabel(verbose: false), limit: weekly, font: .system(size: 9))
+            }
+            if let codeReview = metrics.codeReviewLimit {
+                MiniLimitRow(label: metrics.service.codeReviewLabel(verbose: false), limit: codeReview, font: .system(size: 9))
+            }
+        }
     }
 }
 
@@ -328,7 +424,7 @@ struct ServiceCompactView: View {
     let metrics: UsageMetrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(metrics.service.iconName)
                     .resizable()
@@ -341,15 +437,49 @@ struct ServiceCompactView: View {
                 WidgetStatusIndicator(status: metrics.overallStatus)
             }
 
-            if let weeklyLimit = metrics.weeklyLimit {
-                HStack {
-                    ProgressView(value: weeklyLimit.clampedUsed, total: weeklyLimit.clampedTotal)
-                        .tint(weeklyLimit.statusColor.color)
-                    Text("\(Int(weeklyLimit.percentage))%")
-                        .font(.caption)
-                }
+            if let session = metrics.sessionLimit {
+                MiniLimitRow(label: metrics.service.sessionLabel(verbose: true), limit: session, font: .caption, showsResetTime: true)
+            }
+            if let weekly = metrics.weeklyLimit {
+                MiniLimitRow(label: metrics.service.weeklyLabel(verbose: true), limit: weekly, font: .caption, showsResetTime: true)
+            }
+            if let codeReview = metrics.codeReviewLimit {
+                MiniLimitRow(label: metrics.service.codeReviewLabel(verbose: true), limit: codeReview, font: .caption, showsResetTime: true)
             }
         }
+    }
+}
+
+struct MiniLimitRow: View {
+    let label: String
+    let limit: UsageLimit
+    let font: Font
+    var showsResetTime: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 4) {
+                Text(label)
+                    .font(font)
+                    .foregroundColor(.secondary)
+                ProgressView(value: limit.clampedUsed, total: limit.clampedTotal)
+                    .tint(limit.statusColor.color)
+                Text("\(Int(limit.percentage))%")
+                    .font(font)
+                    .foregroundColor(.secondary)
+            }
+            if showsResetTime, let reset = limit.resetTime {
+                Text("Resets \(Self.formatResetTime(reset))")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    private static func formatResetTime(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 

@@ -5,6 +5,7 @@ struct SettingsView: View {
     @StateObject private var authManager = AuthenticationManager.shared
     @StateObject private var dataManager = UsageDataManager.shared
     @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
+    @StateObject private var codexCliService = CodexCliLocalService.shared
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var costTracker = CostTracker.shared
 
@@ -151,6 +152,51 @@ struct SettingsView: View {
                     showingOpenAIHelp = true
                 }
                 .buttonStyle(.link)
+            }
+
+            Section("OpenAI Codex (Plus/Pro/Team)") {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(codexCliService.hasAccess ? .green : .gray)
+                    Text(codexCliService.hasAccess ? "Connected" : "Not Connected")
+                }
+
+                if codexCliService.hasAccess {
+                    if let subscriptionType = codexCliService.subscriptionType {
+                        HStack {
+                            Text("Plan:")
+                                .foregroundColor(.secondary)
+                            Text(subscriptionType.capitalized)
+                                .bold()
+                        }
+                        .font(.caption)
+                    }
+
+                    Button("Refresh Status") {
+                        codexCliService.checkAccess()
+                        Task {
+                            await dataManager.refreshAll()
+                        }
+                    }
+                } else {
+                    Text("Reads the OAuth token from ~/.codex/auth.json — written directly by Codex CLI on login, no Keychain step required.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Text("Log in to Codex CLI first: run `codex login` in Terminal and pick your team/workspace.")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+
+                    Button("Check Again") {
+                        codexCliService.checkAccess()
+                        if codexCliService.hasAccess {
+                            Task {
+                                await dataManager.refreshAll()
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
             }
 
             Section("Cursor") {

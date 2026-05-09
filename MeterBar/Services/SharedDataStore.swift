@@ -1,6 +1,11 @@
 import Foundation
 import WidgetKit
 
+enum MeterBarSignals {
+    static let widgetRefreshRequested: CFString =
+        "group.com.jmdeejay.meterbar.refresh" as CFString
+}
+
 /// Shared data store using App Groups for Widget extension access
 class SharedDataStore {
     static let shared = SharedDataStore()

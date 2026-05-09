@@ -36,10 +36,18 @@ struct MenuBarView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Header
-            HStack {
+            HStack(spacing: 12) {
+                Button(action: openSettings) {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.plain)
+                .help("Settings")
+
                 Text("MeterBar")
                     .font(.headline)
+
                 Spacer()
+
                 Button(action: {
                     Task {
                         await dataManager.refreshAll()
@@ -48,6 +56,7 @@ struct MenuBarView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(.plain)
+                .help("Refresh now")
             }
             .padding()
             .background(Color(NSColor.controlBackgroundColor))
@@ -113,6 +122,10 @@ struct MenuBarView: View {
             .padding(.vertical, 8)
         }
         .frame(width: 320, height: 500)
+    }
+
+    private func openSettings() {
+        SettingsWindowManager.shared.openSettings()
     }
 }
 
@@ -667,7 +680,7 @@ struct CodexCliServiceRow: View {
                 Divider()
 
                 if let sessionLimit = metrics.sessionLimit {
-                    LimitRow(title: "5 Hour Limit", limit: sessionLimit)
+                    LimitRow(title: "Session (5h)", limit: sessionLimit)
                 }
 
                 if let weeklyLimit = metrics.weeklyLimit {

@@ -1,17 +1,18 @@
 import SwiftUI
 import UserNotifications
+import AppKit
 
 @main
 struct MeterBarApp: App {
     @StateObject private var dataManager = UsageDataManager.shared
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    
+
     init() {
         print("═══════════════════════════════════════")
         print("🎯 MeterBar: App Initializing")
         print("═══════════════════════════════════════")
     }
-    
+
     var body: some Scene {
         Settings {
             SettingsView()
@@ -51,6 +52,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Setup notifications (also handles initial data refresh)
         setupNotifications()
+
+        // Listen for the widget's refresh button (Darwin notification posted
+        // by RefreshUsageIntent in the widget extension).
+        setupWidgetRefreshListener()
+    }
+
+    private func setupWidgetRefreshListener() {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        CFNotificationCenterAddObserver(
+            center,
+            nil,
+            { _, _, _, _, _ in
+                DispatchQueue.main.async {
+                    Task { @MainActor in
+                        await UsageDataManager.shared.refreshAll()
+                    }
+                }
+            },
+            MeterBarSignals.widgetRefreshRequested,
+            nil,
+            .deliverImmediately
+        )
     }
     
     @objc func togglePopover() {
