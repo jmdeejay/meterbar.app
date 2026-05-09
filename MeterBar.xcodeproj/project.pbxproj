@@ -51,6 +51,13 @@
 			);
 			target = 5259E43C2F032E77001001CF /* MeterBarWidgetExtension */;
 		};
+		5259E4602F032E78001001CF /* Exceptions for "MeterBar" folder in "MeterBarWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Services/SharedDataStore.swift,
+			);
+			target = 5259E43C2F032E77001001CF /* MeterBarWidgetExtension */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -64,6 +71,9 @@
 		};
 		52CFA5022F0323EF0036036C /* MeterBar */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				5259E4602F032E78001001CF /* Exceptions for "MeterBar" folder in "MeterBarWidgetExtension" target */,
+			);
 			path = MeterBar;
 			sourceTree = "<group>";
 		};

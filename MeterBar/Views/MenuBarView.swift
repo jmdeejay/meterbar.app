@@ -1,9 +1,9 @@
 import SwiftUI
 import AppKit
 
-// Which card is currently expanded (accordion behavior - only one at a time)
-enum ExpandedCard: Equatable {
-    case none
+// Which service rows are currently expanded. The set lives in AppStorage so that
+// the user's choice persists across app launches.
+enum ExpandedCard: String, Equatable, Hashable {
     case claudeCode
     case codexCli
     case cursor
@@ -16,8 +16,22 @@ struct MenuBarView: View {
     @StateObject private var codexCliService = CodexCliLocalService.shared
     @StateObject private var cursorService = CursorLocalService.shared
 
-    // Track which card is expanded (only one at a time)
-    @State private var expandedCard: ExpandedCard = .none
+    // Comma-separated raw values, persisted across launches.
+    // Set<ExpandedCard> isn't directly @AppStorage-compatible, so we serialize manually.
+    @AppStorage("expandedCardsRaw") private var expandedCardsRaw: String = ""
+
+    private var expandedCards: Binding<Set<ExpandedCard>> {
+        Binding(
+            get: {
+                Set(self.expandedCardsRaw.split(separator: ",").compactMap {
+                    ExpandedCard(rawValue: String($0))
+                })
+            },
+            set: { newValue in
+                self.expandedCardsRaw = newValue.map(\.rawValue).sorted().joined(separator: ",")
+            }
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -50,7 +64,7 @@ struct MenuBarView: View {
                         ClaudeCodeServiceRow(
                             hasAccess: claudeCodeService.hasAccess,
                             metrics: dataManager.metrics[.claudeCode],
-                            expandedCard: $expandedCard
+                            expandedCards: expandedCards
                         )
                     } else if authManager.isClaudeAuthenticated {
                         // User has Claude API key configured - show that
@@ -64,7 +78,7 @@ struct MenuBarView: View {
                         ClaudeCodeServiceRow(
                             hasAccess: false,
                             metrics: nil,
-                            expandedCard: $expandedCard
+                            expandedCards: expandedCards
                         )
                     }
 
@@ -72,14 +86,14 @@ struct MenuBarView: View {
                     CodexCliServiceRow(
                         hasAccess: codexCliService.hasAccess,
                         metrics: dataManager.metrics[.codexCli],
-                        expandedCard: $expandedCard
+                        expandedCards: expandedCards
                     )
 
                     // Cursor (Local)
                     CursorServiceRow(
                         hasAccess: cursorService.hasAccess,
                         metrics: dataManager.metrics[.cursor],
-                        expandedCard: $expandedCard
+                        expandedCards: expandedCards
                     )
                 }
                 .padding()
@@ -315,18 +329,18 @@ struct ServiceRowView: View {
 struct CursorServiceRow: View {
     let hasAccess: Bool
     let metrics: UsageMetrics?
-    @Binding var expandedCard: ExpandedCard
+    @Binding var expandedCards: Set<ExpandedCard>
 
     @StateObject private var cursorService = CursorLocalService.shared
     @StateObject private var dataManager = UsageDataManager.shared
 
-    private var isExpanded: Bool { expandedCard == .cursor }
+    private var isExpanded: Bool { expandedCards.contains(.cursor) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Header - entire row is tappable
             Button(action: {
-                expandedCard = isExpanded ? .none : .cursor
+                if isExpanded { expandedCards.remove(.cursor) } else { expandedCards.insert(.cursor) }
             }) {
                 HStack {
                     Image(systemName: ServiceType.cursor.iconName)
@@ -436,18 +450,20 @@ struct CursorServiceRow: View {
 struct ClaudeCodeServiceRow: View {
     let hasAccess: Bool
     let metrics: UsageMetrics?
-    @Binding var expandedCard: ExpandedCard
+    @Binding var expandedCards: Set<ExpandedCard>
 
     @StateObject private var claudeCodeService = ClaudeCodeLocalService.shared
     @StateObject private var dataManager = UsageDataManager.shared
 
-    private var isExpanded: Bool { expandedCard == .claudeCode }
+    @State private var importError: String?
+
+    private var isExpanded: Bool { expandedCards.contains(.claudeCode) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Header - entire row is tappable
             Button(action: {
-                expandedCard = isExpanded ? .none : .claudeCode
+                if isExpanded { expandedCards.remove(.claudeCode) } else { expandedCards.insert(.claudeCode) }
             }) {
                 HStack {
                     Image(systemName: ServiceType.claudeCode.iconName)
@@ -481,19 +497,49 @@ struct ClaudeCodeServiceRow: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                Button(action: {
-                    claudeCodeService.checkAccess()
-                    if claudeCodeService.hasAccess {
-                        Task { await dataManager.refreshAll() }
+                HStack {
+                    Button(action: {
+                        importError = nil
+                        switch claudeCodeService.importCredentialsFromKeychain() {
+                        case .success:
+                            Task { await dataManager.refreshAll() }
+                        case .failure(let err):
+                            if case .apiError(let msg) = err {
+                                importError = msg
+                            } else {
+                                importError = "\(err)"
+                            }
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "key.fill")
+                            Text("Import from Keychain")
+                        }
+                        .font(.caption)
                     }
-                }) {
-                    HStack {
-                        Image(systemName: "arrow.clockwise")
-                        Text("Check Again")
+                    .buttonStyle(.borderedProminent)
+
+                    Button(action: {
+                        claudeCodeService.checkAccess()
+                        if claudeCodeService.hasAccess {
+                            Task { await dataManager.refreshAll() }
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "arrow.clockwise")
+                            Text("Check Again")
+                        }
+                        .font(.caption)
                     }
-                    .font(.caption)
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.bordered)
+
+                if let msg = importError {
+                    Text(msg)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             // Expanded content
@@ -556,18 +602,18 @@ struct ClaudeCodeServiceRow: View {
 struct CodexCliServiceRow: View {
     let hasAccess: Bool
     let metrics: UsageMetrics?
-    @Binding var expandedCard: ExpandedCard
+    @Binding var expandedCards: Set<ExpandedCard>
 
     @StateObject private var codexCliService = CodexCliLocalService.shared
     @StateObject private var dataManager = UsageDataManager.shared
 
-    private var isExpanded: Bool { expandedCard == .codexCli }
+    private var isExpanded: Bool { expandedCards.contains(.codexCli) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Header - entire row is tappable
             Button(action: {
-                expandedCard = isExpanded ? .none : .codexCli
+                if isExpanded { expandedCards.remove(.codexCli) } else { expandedCards.insert(.codexCli) }
             }) {
                 HStack {
                     Image(systemName: ServiceType.codexCli.iconName)

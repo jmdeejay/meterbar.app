@@ -139,47 +139,6 @@ struct UsageMetrics: Codable, Identifiable {
     }
 }
 
-// MARK: - Shared Data Store (simplified for Widget)
-
-class SharedDataStore {
-    static let shared = SharedDataStore()
-
-    private let appGroupIdentifier = "group.dev.shipshit.meterbar"
-    private let metricsKey = "cached_usage_metrics"
-
-    private var containerURL: URL? {
-        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)
-    }
-
-    func loadMetrics() -> [ServiceType: UsageMetrics] {
-        guard let containerURL = containerURL else {
-            print("❌ [Widget] App Group container not available")
-            return [:]
-        }
-
-        let fileURL = containerURL.appendingPathComponent("\(metricsKey).json")
-        print("📂 [Widget] Reading from: \(fileURL.path)")
-
-        guard let data = try? Data(contentsOf: fileURL) else {
-            print("❌ [Widget] No data file found")
-            return [:]
-        }
-
-        guard let decoded = try? JSONDecoder().decode([String: UsageMetrics].self, from: data) else {
-            print("❌ [Widget] Failed to decode JSON")
-            return [:]
-        }
-
-        let metrics = decoded.reduce(into: [ServiceType: UsageMetrics]()) { result, pair in
-            if let service = ServiceType(rawValue: pair.key) {
-                result[service] = pair.value
-            }
-        }
-        print("✅ [Widget] Loaded \(metrics.count) services")
-        return metrics
-    }
-}
-
 // MARK: - Widget
 
 struct UsageWidget: Widget {

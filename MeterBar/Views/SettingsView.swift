@@ -14,6 +14,8 @@ struct SettingsView: View {
     @State private var showingClaudeHelp = false
     @State private var showingOpenAIHelp = false
 
+    @State private var claudeCodeImportError: String?
+
     var body: some View {
         Form {
             Section("Claude (Anthropic)") {
@@ -80,23 +82,44 @@ struct SettingsView: View {
                         }
                     }
                 } else {
-                    Text("Automatically reads Claude Code CLI credentials from macOS Keychain.")
+                    Text("Claude Code stores its OAuth token in the macOS Keychain. Import it once into ~/.claude/.credentials.json so MeterBar can read it on every refresh.")
                         .font(.caption)
                         .foregroundColor(.secondary)
 
-                    Text("Log in to Claude Code CLI first: run 'claude' in terminal")
+                    Text("If you haven't logged in yet: run `claude` in Terminal first.")
                         .font(.caption)
                         .foregroundColor(.orange)
 
-                    Button("Check Again") {
-                        claudeCodeService.checkAccess()
-                        if claudeCodeService.hasAccess {
-                            Task {
-                                await dataManager.refreshAll()
+                    HStack {
+                        Button("Import from Keychain") {
+                            claudeCodeImportError = nil
+                            switch claudeCodeService.importCredentialsFromKeychain() {
+                            case .success:
+                                Task { await dataManager.refreshAll() }
+                            case .failure(let err):
+                                if case .apiError(let msg) = err {
+                                    claudeCodeImportError = msg
+                                } else {
+                                    claudeCodeImportError = "\(err)"
+                                }
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button("Check Again") {
+                            claudeCodeService.checkAccess()
+                            if claudeCodeService.hasAccess {
+                                Task { await dataManager.refreshAll() }
                             }
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+
+                    if let msg = claudeCodeImportError {
+                        Text(msg)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
 
@@ -155,7 +178,7 @@ struct SettingsView: View {
                         }
                     }
                 } else {
-                    Text("Automatically reads Cursor IDE credentials from macOS Keychain.")
+                    Text("Reads Cursor's auth token from its local SQLite database.")
                         .font(.caption)
                         .foregroundColor(.secondary)
 

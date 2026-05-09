@@ -38,9 +38,10 @@ A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, and Curso
 - **Menu Bar App**: Quick access to usage data from your menu bar
 - **Widget Support**: macOS widget for at-a-glance monitoring
 - **Multi-Service Support**: Track Claude Code, Codex CLI, and Cursor
-- **Zero Configuration**: Automatically reads credentials from CLI tools (no API keys needed)
+- **Local-First Auth**: Reads credentials from CLI tool config files (no API keys needed). \
+    Claude Code on macOS requires a one-click *Import from Keychain* the first time — no implicit cross-app keychain reads on every refresh.
 - **Real-time Updates**: Background refresh every 15 minutes
-- **Accordion UI**: Collapsible cards show compact progress bars
+- **Multi-Expand UI**: Service rows expand independently and the choice persists across launches
 - **Color-coded Status**: Green (good), Yellow (warning), Red (critical)
 
 ## Supported Services
@@ -91,7 +92,9 @@ open MeterBar.xcodeproj
 
 1. Install Claude Code CLI: `npm install -g @anthropic-ai/claude-code`
 2. Log in: `claude login`
-3. The app automatically reads credentials from `~/.claude/`
+3. In MeterBar, expand the **Claude Code** row and click **Import from Keychain**. macOS will show a one-time consent prompt for the `Claude Code-credentials` keychain item — click **Always Allow**. MeterBar copies the OAuth blob into `~/.claude/.credentials.json` (mode `600`) and reads from that file on every refresh thereafter.
+
+> The keychain is only touched when you click Import. If Claude Code rotates its OAuth refresh token (rare), the section will return to *Not Connected* and you can click Import again. On Linux/non-keychain Claude Code installs, `~/.claude/.credentials.json` already exists and the import step is unnecessary.
 
 ### Codex CLI
 
@@ -160,13 +163,14 @@ The CLI is automatically installed when using Homebrew. For manual installs, it'
 MeterBar reads authentication tokens from local files created by CLI tools:
 
 ```
-~/.claude.ai/            # Claude Code OAuth
-~/.codex/auth.json       # Codex CLI OAuth
+~/.claude/.credentials.json            # Claude Code OAuth (also reads .claude.json metadata
+                                       # and ANTHROPIC_AUTH_TOKEN from settings.json)
+~/.codex/auth.json                     # Codex CLI OAuth
 ~/Library/Application Support/Cursor/  # Cursor local DB
 ```
 
 It then calls the respective APIs to fetch current usage data:
-- Claude: `https://api.anthropic.com/settings/usage`
+- Claude Code: `https://api.anthropic.com/api/oauth/usage`
 - Codex: `https://chatgpt.com/backend-api/wham/usage`
 - Cursor: Local SQLite queries
 
@@ -194,6 +198,14 @@ Make sure you're logged into the CLI tool:
 ```bash
 claude login   # For Claude Code
 codex login    # For Codex CLI
+```
+
+### Claude Code shows "Not Connected" after `claude login`
+
+On macOS, Claude Code stores its OAuth token in the system Keychain by default — there's no `~/.claude/.credentials.json` file for MeterBar to read. Click **Import from Keychain** in the Claude Code row to copy the credentials into the file MeterBar reads (one-time, with a macOS consent prompt). If you'd rather do it manually:
+```bash
+security find-generic-password -s "Claude Code-credentials" -w > ~/.claude/.credentials.json
+chmod 600 ~/.claude/.credentials.json
 ```
 
 ### Codex showing "Free" instead of Team

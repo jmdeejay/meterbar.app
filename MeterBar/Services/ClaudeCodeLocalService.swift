@@ -1,15 +1,21 @@
 import Foundation
 import AppKit
 import Combine
+import Security
 
+/// Service for fetching Claude Code usage data from `https://api.anthropic.com/api/oauth/usage`.
+///
+/// Authentication on every refresh is resolved exclusively from local files under `~/.claude/`.
+/// The macOS Keychain item `Claude Code-credentials` is *only* read by the user-initiated
+/// `importCredentialsFromKeychain()` bridge (see below), which copies the OAuth blob to
+/// `~/.claude/.credentials.json` once and never touches the keychain again until the user
+/// explicitly clicks Import again. This avoids the original problem (implicit cross-app keychain
+/// reads on every fetch — incompatible with App Sandbox and lacking user consent). See issue #14.
 class ClaudeCodeLocalService: ObservableObject {
     static let shared = ClaudeCodeLocalService()
 
     // Working endpoint (discovered via testing)
     private let usageEndpoint = "https://api.anthropic.com/api/oauth/usage"
-
-    private let baseURL = "https://api.anthropic.com"
-    private let keychainService = "Claude Code-credentials"
 
     // URLSession with timeout configuration
     private lazy var urlSession: URLSession = {
@@ -26,52 +32,36 @@ class ClaudeCodeLocalService: ObservableObject {
     @Published private(set) var lastError: ServiceError?
 
     private init() {
-        // Check if we have Claude Code credentials on init
-        if let _ = getOAuthToken() {
-            hasAccess = true
-        }
+        applySnapshot(currentSnapshot())
     }
 
-    // MARK: - Keychain Access
+    // MARK: - Local Credential Resolution
 
-    /// Get OAuth token from Claude Code's keychain storage
-    func getOAuthToken() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let jsonString = String(data: data, encoding: .utf8) else {
-            return nil
+    /// Real user home directory — `getpwuid(getuid())` returns the actual home even when the
+    /// process is sandboxed and `FileManager.homeDirectoryForCurrentUser` would point at a
+    /// container path.
+    private func getRealHomeDirectory() -> String {
+        if let pw = getpwuid(getuid()) {
+            return String(cString: pw.pointee.pw_dir)
         }
-
-        // Parse the JSON to extract the access token
-        guard let jsonData = jsonString.data(using: .utf8),
-              let credentials = try? JSONDecoder().decode(ClaudeCodeCredentials.self, from: jsonData) else {
-            return nil
+        if let home = ProcessInfo.processInfo.environment["HOME"] {
+            return home
         }
-
-        // Update subscription info
-        DispatchQueue.main.async {
-            self.subscriptionType = credentials.claudeAiOauth.subscriptionType
-            self.rateLimitTier = credentials.claudeAiOauth.rateLimitTier
-            self.hasAccess = true
-        }
-
-        return credentials.claudeAiOauth.accessToken
+        return FileManager.default.homeDirectoryForCurrentUser.path
     }
 
-    /// Check and update access status
-    func checkAccess() {
-        if let _ = getOAuthToken() {
+    /// Pure: read `~/.claude/` and return a credential snapshot (or nil if none of the local
+    /// files can supply a bearer token). Does not mutate published state.
+    private func currentSnapshot() -> ClaudeCodeCredentialSnapshot? {
+        return ClaudeCodeCredentialResolver.resolveSnapshot(homeDirectory: getRealHomeDirectory())
+    }
+
+    /// Apply a snapshot to the published auth state. Pass `nil` to clear.
+    private func applySnapshot(_ snapshot: ClaudeCodeCredentialSnapshot?) {
+        if let snapshot = snapshot {
             hasAccess = true
+            subscriptionType = snapshot.subscriptionType
+            rateLimitTier = snapshot.rateLimitTier
         } else {
             hasAccess = false
             subscriptionType = nil
@@ -79,16 +69,86 @@ class ClaudeCodeLocalService: ObservableObject {
         }
     }
 
+    /// Re-read local credentials and update access state. When no token-bearing source is
+    /// available, all auth-related published fields are cleared (failure-closed).
+    func checkAccess() {
+        applySnapshot(currentSnapshot())
+    }
+
+    // MARK: - One-time Keychain Import
+
+    /// User-initiated bridge for users whose Claude Code build only writes its OAuth token
+    /// to the macOS Keychain (the default on macOS). Reads the keychain blob ONCE — only
+    /// when this method is called from an explicit UI action — and writes it verbatim to
+    /// `~/.claude/.credentials.json`. The rest of the service continues to read from the
+    /// file path; the keychain is never consulted again until the user clicks Import once
+    /// more (e.g. after a token rotation). The first call triggers macOS's standard
+    /// cross-app keychain consent prompt.
+    @discardableResult
+    func importCredentialsFromKeychain() -> Result<Void, ServiceError> {
+        let query: [String: Any] = [
+            kSecClass as String:        kSecClassGenericPassword,
+            kSecAttrService as String:  "Claude Code-credentials",
+            kSecReturnData as String:   true,
+            kSecMatchLimit as String:   kSecMatchLimitOne,
+        ]
+
+        var item: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        switch status {
+        case errSecSuccess:
+            break
+        case errSecItemNotFound:
+            return .failure(.apiError("No Claude Code credentials in Keychain. Run `claude` in Terminal to log in first."))
+        case errSecUserCanceled, errSecAuthFailed:
+            return .failure(.apiError("Keychain access denied. Click Allow on the prompt and try again."))
+        default:
+            return .failure(.apiError("Keychain error \(status)"))
+        }
+
+        guard let data = item as? Data,
+              ClaudeCodeCredentialResolver.parseCredentialsFile(data: data) != nil else {
+            return .failure(.apiError("Unexpected keychain data format."))
+        }
+
+        let claudeDir = "\(getRealHomeDirectory())/.claude"
+        let filePath  = "\(claudeDir)/.credentials.json"
+        try? FileManager.default.createDirectory(
+            atPath: claudeDir,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+
+        do {
+            try data.write(to: URL(fileURLWithPath: filePath), options: [.atomic])
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: filePath
+            )
+        } catch {
+            return .failure(.apiError("Could not write \(filePath): \(error.localizedDescription)"))
+        }
+
+        checkAccess()
+        return .success(())
+    }
+
     // MARK: - Usage Fetching
 
     func fetchUsageMetrics() async throws -> UsageMetrics {
-        guard let token = getOAuthToken() else {
+        let snapshot = currentSnapshot()
+
+        guard let snapshot = snapshot else {
             let error = ServiceError.notAuthenticated
             await MainActor.run {
+                self.applySnapshot(nil)
                 self.lastError = error
-                self.hasAccess = false
             }
             throw error
+        }
+
+        await MainActor.run {
+            self.applySnapshot(snapshot)
         }
 
         guard let url = URL(string: usageEndpoint) else {
@@ -97,7 +157,7 @@ class ClaudeCodeLocalService: ObservableObject {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(snapshot.token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
@@ -112,7 +172,7 @@ class ClaudeCodeLocalService: ObservableObject {
 
             if httpResponse.statusCode == 401 {
                 await MainActor.run {
-                    self.hasAccess = false
+                    self.applySnapshot(nil)
                     self.lastError = ServiceError.notAuthenticated
                 }
                 throw ServiceError.notAuthenticated
@@ -186,24 +246,102 @@ class ClaudeCodeLocalService: ObservableObject {
     }
 }
 
-// MARK: - Response Models
+// MARK: - Local Credential Resolver
 
-struct ClaudeCodeCredentials: Codable {
-    let claudeAiOauth: ClaudeAiOAuth
-
-    enum CodingKeys: String, CodingKey {
-        case claudeAiOauth = "claudeAiOauth"
-    }
-}
-
-struct ClaudeAiOAuth: Codable {
-    let accessToken: String
-    let refreshToken: String
-    let expiresAt: Int64
-    let scopes: [String]
+/// Snapshot of the credentials resolved from `~/.claude/` config files.
+struct ClaudeCodeCredentialSnapshot: Equatable {
+    let token: String
     let subscriptionType: String?
     let rateLimitTier: String?
 }
+
+/// Pure parser for Claude Code's local config files. Exposed at module-internal access so
+/// `ClaudeCodeLocalServiceTests` can exercise precedence and failure-closed behavior with
+/// inline fixtures and a temporary home directory.
+enum ClaudeCodeCredentialResolver {
+    /// Search `~/.claude/.credentials.json`, `~/.claude/.claude.json`, and `~/.claude/settings.json`
+    /// in that fixed order. Tokens are sourced from `.credentials.json` first, then from
+    /// `settings.json`'s `env.ANTHROPIC_AUTH_TOKEN`. Subscription metadata is taken from the
+    /// credentials file when present and otherwise enriched from `.claude.json`. Returns nil
+    /// when no readable source can supply a bearer token.
+    static func resolveSnapshot(homeDirectory: String) -> ClaudeCodeCredentialSnapshot? {
+        let claudeDir = "\(homeDirectory)/.claude"
+
+        let credentialsSnapshot = readFile(at: "\(claudeDir)/.credentials.json")
+            .flatMap(parseCredentialsFile)
+        let claudeJsonMetadata = readFile(at: "\(claudeDir)/.claude.json")
+            .flatMap(parseClaudeJsonMetadata)
+        let settingsToken = readFile(at: "\(claudeDir)/settings.json")
+            .flatMap(parseSettingsAuthToken)
+
+        guard let token = credentialsSnapshot?.token ?? settingsToken else {
+            return nil
+        }
+
+        let subscriptionType = credentialsSnapshot?.subscriptionType
+            ?? claudeJsonMetadata?.subscriptionType
+        let rateLimitTier = credentialsSnapshot?.rateLimitTier
+            ?? claudeJsonMetadata?.rateLimitTier
+
+        return ClaudeCodeCredentialSnapshot(
+            token: token,
+            subscriptionType: subscriptionType,
+            rateLimitTier: rateLimitTier
+        )
+    }
+
+    /// Decode `~/.claude/.credentials.json`. Expected shape mirrors what Claude Code writes
+    /// on platforms without a system Keychain: a `claudeAiOauth` object with `accessToken`
+    /// and optional `subscriptionType` / `rateLimitTier` metadata.
+    static func parseCredentialsFile(data: Data) -> ClaudeCodeCredentialSnapshot? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let oauth = object["claudeAiOauth"] as? [String: Any],
+              let token = oauth["accessToken"] as? String,
+              !token.isEmpty else {
+            return nil
+        }
+        return ClaudeCodeCredentialSnapshot(
+            token: token,
+            subscriptionType: oauth["subscriptionType"] as? String,
+            rateLimitTier: oauth["rateLimitTier"] as? String
+        )
+    }
+
+    /// Extract subscription metadata from `~/.claude/.claude.json`. Tolerates the field living
+    /// either under an `oauthAccount` object or at the top level.
+    static func parseClaudeJsonMetadata(data: Data) -> (subscriptionType: String?, rateLimitTier: String?)? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        let oauthAccount = object["oauthAccount"] as? [String: Any]
+        let subscription = (oauthAccount?["subscriptionType"] as? String)
+            ?? (object["subscriptionType"] as? String)
+        let tier = (oauthAccount?["rateLimitTier"] as? String)
+            ?? (object["rateLimitTier"] as? String)
+        if subscription == nil && tier == nil {
+            return nil
+        }
+        return (subscriptionType: subscription, rateLimitTier: tier)
+    }
+
+    /// Extract a bearer token override from `~/.claude/settings.json`'s `env.ANTHROPIC_AUTH_TOKEN`,
+    /// matching the standard env-var that Claude Code honors at runtime.
+    static func parseSettingsAuthToken(data: Data) -> String? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let env = object["env"] as? [String: Any],
+              let token = env["ANTHROPIC_AUTH_TOKEN"] as? String,
+              !token.isEmpty else {
+            return nil
+        }
+        return token
+    }
+
+    private static func readFile(at path: String) -> Data? {
+        return FileManager.default.contents(atPath: path)
+    }
+}
+
+// MARK: - Response Models
 
 struct ClaudeCodeUsageResponse: Codable {
     let fiveHour: UsageWindow
@@ -219,7 +357,7 @@ struct ClaudeCodeUsageResponse: Codable {
 
 struct UsageWindow: Codable {
     let utilization: Double
-    let resetsAt: Date
+    let resetsAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case utilization

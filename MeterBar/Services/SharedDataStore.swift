@@ -1,4 +1,5 @@
 import Foundation
+import WidgetKit
 
 /// Shared data store using App Groups for Widget extension access
 class SharedDataStore {
@@ -28,6 +29,8 @@ class SharedDataStore {
         
         if let data = try? JSONEncoder().encode(encoded) {
             try? data.write(to: fileURL)
+            // Without this, the widget would only refresh on its 15-min timeline schedule.
+            WidgetCenter.shared.reloadTimelines(ofKind: "UsageWidget")
         }
     }
     
