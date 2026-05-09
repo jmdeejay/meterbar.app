@@ -37,18 +37,7 @@ class ClaudeCodeLocalService: ObservableObject {
 
     // MARK: - Local Credential Resolution
 
-    /// Real user home directory — `getpwuid(getuid())` returns the actual home even when the
-    /// process is sandboxed and `FileManager.homeDirectoryForCurrentUser` would point at a
-    /// container path.
-    private func getRealHomeDirectory() -> String {
-        if let pw = getpwuid(getuid()) {
-            return String(cString: pw.pointee.pw_dir)
-        }
-        if let home = ProcessInfo.processInfo.environment["HOME"] {
-            return home
-        }
-        return FileManager.default.homeDirectoryForCurrentUser.path
-    }
+    private func getRealHomeDirectory() -> String { RealHome.path }
 
     /// Pure: read `~/.claude/` and return a credential snapshot (or nil if none of the local
     /// files can supply a bearer token). Does not mutate published state.

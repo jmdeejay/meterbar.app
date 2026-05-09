@@ -45,7 +45,7 @@ class CostTracker: ObservableObject {
     }
 
     private func scanClaudeCodeSessions(since cutoffDate: Date) async -> TokenCost? {
-        let claudeDir = FileManager.default.homeDirectoryForCurrentUser
+        let claudeDir = URL(fileURLWithPath: RealHome.path)
             .appendingPathComponent(".claude")
             .appendingPathComponent("projects")
 
@@ -68,13 +68,17 @@ class CostTracker: ObservableObject {
             )
 
             for projectDir in projectDirs {
-                guard projectDir.hasDirectoryPath || projectDir.pathExtension == "" else { continue }
+                let isDir = (try? projectDir.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+                guard isDir else { continue }
 
-                // Find all .jsonl files in each project
-                let jsonlFiles = try FileManager.default.contentsOfDirectory(
+                // Listing the project dir is wrapped in `try?` so a single
+                // unreadable entry can't fail the entire scan.
+                guard let jsonlFiles = try? FileManager.default.contentsOfDirectory(
                     at: projectDir,
                     includingPropertiesForKeys: [.contentModificationDateKey]
-                ).filter { $0.pathExtension == "jsonl" }
+                ).filter({ $0.pathExtension == "jsonl" }) else {
+                    continue
+                }
 
                 for jsonlFile in jsonlFiles {
                     // Check file modification date
