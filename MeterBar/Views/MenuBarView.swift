@@ -107,19 +107,6 @@ struct MenuBarView: View {
                 }
                 .padding()
             }
-
-            Divider()
-
-            // Footer Actions
-            HStack {
-                Button("Quit") {
-                    NSApplication.shared.terminate(nil)
-                }
-                .buttonStyle(.bordered)
-                .foregroundColor(.red)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
         }
         .frame(width: 320, height: 500)
     }

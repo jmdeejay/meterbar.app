@@ -249,9 +249,9 @@ struct UsageWidgetEntryView: View {
 
 
 struct WidgetRefreshButton: View {
-    var topPadding: CGFloat = 4
-    var trailingPadding: CGFloat = 4
-    var iconSize: CGFloat = 9
+    var topPadding: CGFloat = 8
+    var trailingPadding: CGFloat = 8
+    var iconSize: CGFloat = 16
 
     var body: some View {
         Group {
@@ -317,9 +317,6 @@ struct SmallWidgetView: View {
         }
         .padding(4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .overlay(alignment: .topTrailing) {
-            WidgetRefreshButton(topPadding: -4, trailingPadding: -8)
-        }
         .containerBackground(.fill.tertiary, for: .widget)
     }
 }
@@ -345,10 +342,11 @@ struct MediumWidgetView: View {
                 }
             }
         }
-        .padding(8)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .overlay(alignment: .topTrailing) {
-            WidgetRefreshButton(topPadding: -8, trailingPadding: 0, iconSize: 12)
+            WidgetRefreshButton(topPadding: -10, trailingPadding: 2, iconSize: 12)
         }
         .containerBackground(.fill.tertiary, for: .widget)
     }
@@ -383,7 +381,7 @@ struct LargeWidgetView: View {
         .padding(8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .overlay(alignment: .topTrailing) {
-            WidgetRefreshButton(topPadding: -8, trailingPadding: 0, iconSize: 12)
+            WidgetRefreshButton(topPadding: -10, trailingPadding: 4, iconSize: 12)
         }
         .containerBackground(.fill.tertiary, for: .widget)
     }
@@ -408,13 +406,13 @@ struct ServiceColumnView: View {
                 WidgetStatusIndicator(status: metrics.overallStatus)
             }
             if let session = metrics.sessionLimit {
-                MiniLimitRow(label: metrics.service.sessionLabel(verbose: false), limit: session, font: .system(size: 9))
+                MiniLimitRow(label: metrics.service.sessionLabel(verbose: true), limit: session, font: .system(size: 10), stackedLabel: true)
             }
             if let weekly = metrics.weeklyLimit {
-                MiniLimitRow(label: metrics.service.weeklyLabel(verbose: false), limit: weekly, font: .system(size: 9))
+                MiniLimitRow(label: metrics.service.weeklyLabel(verbose: true), limit: weekly, font: .system(size: 10), stackedLabel: true)
             }
             if let codeReview = metrics.codeReviewLimit {
-                MiniLimitRow(label: metrics.service.codeReviewLabel(verbose: false), limit: codeReview, font: .system(size: 9))
+                MiniLimitRow(label: metrics.service.codeReviewLabel(verbose: true), limit: codeReview, font: .system(size: 10), stackedLabel: true)
             }
         }
     }
@@ -424,7 +422,7 @@ struct ServiceCompactView: View {
     let metrics: UsageMetrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Image(metrics.service.iconName)
                     .resizable()
@@ -438,13 +436,13 @@ struct ServiceCompactView: View {
             }
 
             if let session = metrics.sessionLimit {
-                MiniLimitRow(label: metrics.service.sessionLabel(verbose: true), limit: session, font: .caption, showsResetTime: true)
+                MiniLimitRow(label: metrics.service.sessionLabel(verbose: true), limit: session, font: .caption, showsResetTime: true, barHeight: 7)
             }
             if let weekly = metrics.weeklyLimit {
-                MiniLimitRow(label: metrics.service.weeklyLabel(verbose: true), limit: weekly, font: .caption, showsResetTime: true)
+                MiniLimitRow(label: metrics.service.weeklyLabel(verbose: true), limit: weekly, font: .caption, showsResetTime: true, barHeight: 7)
             }
             if let codeReview = metrics.codeReviewLimit {
-                MiniLimitRow(label: metrics.service.codeReviewLabel(verbose: true), limit: codeReview, font: .caption, showsResetTime: true)
+                MiniLimitRow(label: metrics.service.codeReviewLabel(verbose: true), limit: codeReview, font: .caption, showsResetTime: true, barHeight: 7)
             }
         }
     }
@@ -455,24 +453,53 @@ struct MiniLimitRow: View {
     let limit: UsageLimit
     let font: Font
     var showsResetTime: Bool = false
+    var barHeight: CGFloat? = nil
+    var stackedLabel: Bool = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            HStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
+            if stackedLabel {
                 Text(label)
                     .font(font)
-                    .foregroundColor(.secondary)
-                ProgressView(value: limit.clampedUsed, total: limit.clampedTotal)
-                    .tint(limit.statusColor.color)
-                Text("\(Int(limit.percentage))%")
-                    .font(font)
-                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    progressBar
+                    Text("\(Int(limit.percentage))%")
+                        .font(font)
+                }
+            } else {
+                HStack(spacing: 4) {
+                    Text(label)
+                        .font(font)
+                    progressBar
+                    Text("\(Int(limit.percentage))%")
+                        .font(font)
+                }
             }
             if showsResetTime, let reset = limit.resetTime {
-                Text("Resets \(Self.formatResetTime(reset))")
+                Text("Resets: \(Self.formatResetTime(reset))")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var progressBar: some View {
+        if let barHeight {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.secondary.opacity(0.25))
+                    Capsule()
+                        .fill(limit.statusColor.color)
+                        .frame(width: geo.size.width * (limit.clampedUsed / limit.clampedTotal))
+                }
+            }
+            .frame(height: barHeight)
+        } else {
+            ProgressView(value: limit.clampedUsed, total: limit.clampedTotal)
+                .tint(limit.statusColor.color)
         }
     }
 

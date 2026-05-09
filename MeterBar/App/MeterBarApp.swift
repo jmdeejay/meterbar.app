@@ -40,8 +40,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         image.isTemplate = true
         button.image = image
         
-        button.action = #selector(togglePopover)
+        button.action = #selector(handleStatusItemClick)
         button.target = self
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.toolTip = "MeterBar"
         
         // Create popover
@@ -76,15 +77,59 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
     
+    @objc func handleStatusItemClick() {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            showStatusBarMenu()
+        } else {
+            togglePopover()
+        }
+    }
+
     @objc func togglePopover() {
         guard let button = statusItem?.button,
               let popover = popover else { return }
-        
+
         if popover.isShown {
             popover.performClose(nil)
         } else {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
+    }
+
+    private func showStatusBarMenu() {
+        let menu = NSMenu()
+
+        let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshFromMenu), keyEquivalent: "r")
+        refreshItem.target = self
+        menu.addItem(refreshItem)
+
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(settingsFromMenu), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        menu.addItem(.separator())
+
+        let quitItem = NSMenuItem(title: "Quit MeterBar", action: #selector(quitFromMenu), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        statusItem?.menu = menu
+        statusItem?.button?.performClick(nil)
+        statusItem?.menu = nil
+    }
+
+    @objc private func refreshFromMenu() {
+        Task { @MainActor in
+            await UsageDataManager.shared.refreshAll()
+        }
+    }
+
+    @objc private func settingsFromMenu() {
+        SettingsWindowManager.shared.openSettings()
+    }
+
+    @objc private func quitFromMenu() {
+        NSApplication.shared.terminate(nil)
     }
     
     private func setupNotifications() {
