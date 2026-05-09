@@ -5,7 +5,7 @@ import WidgetKit
 class SharedDataStore {
     static let shared = SharedDataStore()
     
-    private let appGroupIdentifier = "group.dev.shipshit.meterbar"
+    private let appGroupIdentifier = "group.com.jmdeejay.meterbar"
     private let metricsKey = "cached_usage_metrics"
     
     private var containerURL: URL? {

@@ -53,7 +53,7 @@ struct Usage: ParsableCommand {
     private func loadCachedMetrics() -> [String: ServiceMetrics] {
         // Try app group container first
         let containerURL = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: "group.dev.shipshit.meterbar"
+            forSecurityApplicationGroupIdentifier: "group.com.jmdeejay.meterbar"
         )
 
         var metricsPath: URL?
