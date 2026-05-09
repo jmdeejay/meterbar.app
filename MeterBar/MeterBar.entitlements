@@ -14,6 +14,9 @@
 	<array>
 		<string>/Library/Application Support/Cursor/</string>
 		<string>/.codex/</string>
+	</array>
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-write</key>
+	<array>
 		<string>/.claude/</string>
 	</array>
 </dict>
