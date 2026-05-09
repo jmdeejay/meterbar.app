@@ -106,31 +106,22 @@ class ClaudeCodeLocalService: ObservableObject {
             return .failure(.apiError("Keychain error \(status)"))
         }
 
-        guard let data = item as? Data,
-              ClaudeCodeCredentialResolver.parseCredentialsFile(data: data) != nil else {
+        guard let data = item as? Data else {
             return .failure(.apiError("Unexpected keychain data format."))
         }
 
-        let claudeDir = "\(getRealHomeDirectory())/.claude"
-        let filePath  = "\(claudeDir)/.credentials.json"
-        try? FileManager.default.createDirectory(
-            atPath: claudeDir,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-
-        do {
-            try data.write(to: URL(fileURLWithPath: filePath), options: [.atomic])
-            try? FileManager.default.setAttributes(
-                [.posixPermissions: 0o600],
-                ofItemAtPath: filePath
-            )
-        } catch {
-            return .failure(.apiError("Could not write \(filePath): \(error.localizedDescription)"))
+        switch ClaudeCodeKeychainImport.importCredentials(
+            from: data,
+            homeDirectory: getRealHomeDirectory()
+        ) {
+        case .success:
+            checkAccess()
+            return .success(())
+        case .failure(.unexpectedFormat):
+            return .failure(.apiError("Unexpected keychain data format."))
+        case .failure(.writeFailed(let filePath, let message)):
+            return .failure(.apiError("Could not write \(filePath): \(message)"))
         }
-
-        checkAccess()
-        return .success(())
     }
 
     // MARK: - Usage Fetching

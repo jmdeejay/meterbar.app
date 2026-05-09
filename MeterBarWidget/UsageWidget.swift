@@ -20,34 +20,19 @@ enum ServiceType: String, Codable, CaseIterable, Identifiable {
     }
 
     var compactDisplayName: String {
-        switch self {
-        case .claudeCode: return "Claude"
-        case .codexCli: return "OpenAI"
-        case .cursor: return "Cursor"
-        }
+        ServiceLabels.compactDisplayName(for: rawValue)
     }
 
     func sessionLabel(verbose: Bool) -> String {
-        switch self {
-        case .claudeCode: return verbose ? "Session (5h)" : "S"
-        case .codexCli:   return verbose ? "Session (5h)" : "S"
-        case .cursor:     return verbose ? "On-Demand" : "OD"
-        }
+        ServiceLabels.sessionLabel(for: rawValue, verbose: verbose)
     }
 
     func weeklyLabel(verbose: Bool) -> String {
-        switch self {
-        case .claudeCode: return verbose ? "All Models (7d)" : "W"
-        case .codexCli:   return verbose ? "Weekly" : "W"
-        case .cursor:     return verbose ? "Monthly" : "M"
-        }
+        ServiceLabels.weeklyLabel(for: rawValue, verbose: verbose)
     }
 
     func codeReviewLabel(verbose: Bool) -> String {
-        switch self {
-        case .claudeCode:        return verbose ? "Sonnet (7d)" : "Sn"
-        case .codexCli, .cursor: return verbose ? "Code Review" : "CR"
-        }
+        ServiceLabels.codeReviewLabel(for: rawValue, verbose: verbose)
     }
 
     var iconName: String {

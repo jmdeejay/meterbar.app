@@ -55,6 +55,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Services/SharedDataStore.swift,
+				Models/ServiceLabels.swift,
 			);
 			target = 5259E43C2F032E77001001CF /* MeterBarWidgetExtension */;
 		};
