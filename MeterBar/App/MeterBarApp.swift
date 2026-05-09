@@ -23,6 +23,7 @@ struct MeterBarApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
+    private var notificationDeduper = NotificationDeduper()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("🚀 MeterBar: Application did finish launching")
@@ -180,18 +181,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func checkAndNotify(metrics: UsageMetrics) {
-        let limits = [metrics.sessionLimit, metrics.weeklyLimit, metrics.codeReviewLimit].compactMap { $0 }
-        
-        for limit in limits {
-            if limit.percentage >= 90 && limit.percentage < 100 {
-                sendNotification(
-                    title: "\(metrics.service.displayName) Usage Warning",
-                    body: "You're at \(Int(limit.percentage))% of your limit"
-                )
-            } else if limit.percentage >= 100 {
+        let entries: [(name: String, limit: UsageLimit)] = [
+            ("session", metrics.sessionLimit),
+            ("weekly", metrics.weeklyLimit),
+            ("codeReview", metrics.codeReviewLimit)
+        ].compactMap { name, limit in limit.map { (name, $0) } }
+
+        for (name, limit) in entries {
+            let tier: NotificationDeduper.Tier?
+            if limit.percentage >= 100 {
+                tier = .reached
+            } else if limit.percentage >= 90 {
+                tier = .warning
+            } else {
+                tier = nil
+            }
+            guard let tier else { continue }
+
+            let key = NotificationDeduper.Key(
+                service: metrics.service,
+                limitName: name,
+                tier: tier
+            )
+            guard notificationDeduper.shouldNotify(key: key, currentResetTime: limit.resetTime) else {
+                continue
+            }
+
+            switch tier {
+            case .reached:
                 sendNotification(
                     title: "\(metrics.service.displayName) Limit Reached",
                     body: "You've reached your usage limit"
+                )
+            case .warning:
+                sendNotification(
+                    title: "\(metrics.service.displayName) Usage Warning",
+                    body: "You're at \(Int(limit.percentage))% of your limit"
                 )
             }
         }
