@@ -40,6 +40,12 @@ class UsageDataManager: ObservableObject {
         isLoading = true
         lastError = nil
 
+        // Re-check local credential files so deleted/added auth files propagate
+        // to `hasAccess` before we decide whether to fetch.
+        claudeCodeService.checkAccess()
+        codexCliService.checkAccess()
+        cursorService.checkAccess()
+
         var newMetrics: [ServiceType: UsageMetrics] = [:]
 
         // Fetch Claude metrics
@@ -108,9 +114,21 @@ class UsageDataManager: ObservableObject {
             }
         }
         
-        // Merge new metrics with existing cached metrics for services that failed to fetch
+        // Preserve cached metrics for services that are *authed* but whose
+        // fetch failed (graceful degradation). Drop entries for services that
+        // are no longer authed so deleted credentials propagate to the widget
+        // cache instead of leaving a stale section behind.
         for service in ServiceType.allCases {
-            if newMetrics[service] == nil, let cachedMetric = self.metrics[service] {
+            guard newMetrics[service] == nil, let cachedMetric = self.metrics[service] else { continue }
+            let isAuthed: Bool
+            switch service {
+            case .claude:     isAuthed = authManager.isClaudeAuthenticated
+            case .claudeCode: isAuthed = claudeCodeService.hasAccess
+            case .openai:     isAuthed = authManager.isOpenAIAuthenticated
+            case .codexCli:   isAuthed = codexCliService.hasAccess
+            case .cursor:     isAuthed = cursorService.hasAccess
+            }
+            if isAuthed {
                 newMetrics[service] = cachedMetric
             }
         }

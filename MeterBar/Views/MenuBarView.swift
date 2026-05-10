@@ -356,20 +356,21 @@ struct CursorServiceRow: View {
 
                     Spacer()
 
-                    if hasAccess {
-                        if let metrics = metrics {
-                            StatusIndicator(status: metrics.overallStatus)
-                        }
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                    if hasAccess, let metrics = metrics {
+                        StatusIndicator(status: metrics.overallStatus)
                     }
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            if !hasAccess {
+            // Expanded content — unauthenticated case
+            if isExpanded, !hasAccess {
+                Divider()
+
                 Text("Log in to Cursor IDE to enable")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -389,7 +390,7 @@ struct CursorServiceRow: View {
                 .buttonStyle(.bordered)
             }
 
-            // Expanded content
+            // Expanded content — authenticated case
             if isExpanded, hasAccess, let metrics = metrics {
                 Divider()
 
@@ -479,20 +480,21 @@ struct ClaudeCodeServiceRow: View {
 
                     Spacer()
 
-                    if hasAccess {
-                        if let metrics = metrics {
-                            StatusIndicator(status: metrics.overallStatus)
-                        }
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                    if hasAccess, let metrics = metrics {
+                        StatusIndicator(status: metrics.overallStatus)
                     }
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            if !hasAccess {
+            // Expanded content — unauthenticated case
+            if isExpanded, !hasAccess {
+                Divider()
+
                 Text("Log in to Claude Code CLI to enable")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -542,7 +544,7 @@ struct ClaudeCodeServiceRow: View {
                 }
             }
 
-            // Expanded content
+            // Expanded content — authenticated case
             if isExpanded, hasAccess, let metrics = metrics {
                 Divider()
 
@@ -629,20 +631,21 @@ struct CodexCliServiceRow: View {
 
                     Spacer()
 
-                    if hasAccess {
-                        if let metrics = metrics {
-                            StatusIndicator(status: metrics.overallStatus)
-                        }
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                    if hasAccess, let metrics = metrics {
+                        StatusIndicator(status: metrics.overallStatus)
                     }
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            if !hasAccess {
+            // Expanded content — unauthenticated case
+            if isExpanded, !hasAccess {
+                Divider()
+
                 Text("Log in to Codex CLI to enable")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -662,7 +665,7 @@ struct CodexCliServiceRow: View {
                 .buttonStyle(.bordered)
             }
 
-            // Expanded content
+            // Expanded content — authenticated case
             if isExpanded, hasAccess, let metrics = metrics {
                 Divider()
 
