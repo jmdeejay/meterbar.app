@@ -126,4 +126,6 @@ for f in "$APP_ENTITLEMENTS_1" "$APP_ENTITLEMENTS_2" "$WIDGET_ENTITLEMENT" "$SHA
     fi
 done
 
-echo "Done. Run scripts/rebuild-and-reload.sh to rebuild with the new identity."
+echo "Personalization complete. Rebuilding with the new identity…"
+exec "$SCRIPT_DIR/rebuild-and-reload.sh"
+echo "Done!"
