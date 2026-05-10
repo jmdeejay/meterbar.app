@@ -20,6 +20,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT="$REPO_ROOT/MeterBar.xcodeproj"
 DERIVED="$REPO_ROOT/build-signed"
 APP="$DERIVED/Build/Products/$CONFIG/MeterBar.app"
+INSTALLED_APP="/Applications/MeterBar.app"
 
 echo "▸ Quitting any running MeterBar instance"
 osascript -e 'tell application "MeterBar" to quit' 2>/dev/null || true
@@ -33,11 +34,27 @@ xcodebuild -project "$PROJECT" \
   -derivedDataPath "$DERIVED" \
   build >/dev/null
 
+# If a copy is already installed in /Applications, mirror the fresh build over
+# it so chronod loads the new widget extension. Without this, chronod prefers
+# the /Applications copy when scanning, and stale widget bundles ship even
+# though the menu bar app we launch is freshly built.
+LAUNCH_APP="$APP"
+if [ -d "$INSTALLED_APP" ]; then
+    echo "▸ Mirroring build to $INSTALLED_APP"
+    rm -rf "$INSTALLED_APP"
+    ditto "$APP" "$INSTALLED_APP"
+    LAUNCH_APP="$INSTALLED_APP"
+fi
+
 echo "▸ Restarting widget daemons (chronod, NotificationCenter)"
 killall chronod 2>/dev/null || true
 killall NotificationCenter 2>/dev/null || true
 
-echo "▸ Launching $APP"
-open "$APP"
+echo "▸ Launching $LAUNCH_APP"
+open "$LAUNCH_APP"
 
 echo "✓ Done. Open Notification Center to see the refreshed widget."
+echo "  Built:    $APP"
+if [ "$LAUNCH_APP" != "$APP" ]; then
+    echo "  Launched: $LAUNCH_APP"
+fi
