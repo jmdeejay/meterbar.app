@@ -30,6 +30,13 @@ final class SettingsWindowManager: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        // `windowWillClose` fires *before* the window is removed from screen.
+        // If we flip to `.accessory` synchronously, macOS still sees a visible
+        // window for this app and silently refuses to demote it — the Dock
+        // icon then sticks around. Deferring to the next runloop tick lets
+        // the close finish first.
+        DispatchQueue.main.async {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 }
