@@ -232,6 +232,23 @@ struct UsageWidgetEntryView: View {
     }
 }
 
+struct EmptyServicesView: View {
+    var iconFont: Font = .largeTitle
+    var textFont: Font = .caption
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(iconFont)
+                .foregroundColor(.orange)
+            Text("No services connected")
+                .font(textFont)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
 
 struct WidgetRefreshButton: View {
     var topPadding: CGFloat = 8
@@ -287,21 +304,21 @@ struct SmallWidgetView: View {
     let entry: UsageWidgetEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        Group {
             if entry.metrics.isEmpty {
-                Text("No data")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                EmptyServicesView(iconFont: .title2, textFont: .caption2)
             } else {
-                ForEach(entry.sortedServices.prefix(3), id: \.self) { service in
-                    if let metrics = entry.metrics[service] {
-                        ServiceMiniView(metrics: metrics)
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(entry.sortedServices.prefix(3), id: \.self) { service in
+                        if let metrics = entry.metrics[service] {
+                            ServiceMiniView(metrics: metrics)
+                        }
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
         }
         .padding(4)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .containerBackground(.fill.tertiary, for: .widget)
     }
 }
@@ -310,15 +327,23 @@ struct MediumWidgetView: View {
     let entry: UsageWidgetEntry
 
     var body: some View {
+        let services = Array(entry.sortedServices.prefix(3))
         Group {
             if entry.metrics.isEmpty {
-                Text("No services connected")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyServicesView(iconFont: .title, textFont: .caption)
+            } else if services.count == 1 {
+                // 1 service: switch to the wide row layout
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(services, id: \.self) { service in
+                        if let metrics = entry.metrics[service] {
+                            ServiceCompactView(metrics: metrics)
+                        }
+                    }
+                }
             } else {
+                // 2–3 services: column layout, splitting width evenly.
                 HStack(alignment: .top, spacing: 10) {
-                    ForEach(entry.sortedServices.prefix(3), id: \.self) { service in
+                    ForEach(services, id: \.self) { service in
                         if let metrics = entry.metrics[service] {
                             ServiceColumnView(metrics: metrics)
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -341,24 +366,13 @@ struct LargeWidgetView: View {
     let entry: UsageWidgetEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 28) {
             if entry.metrics.isEmpty {
-                VStack {
-                    Image(systemName: "exclamationmark.triangle")
-                        .font(.largeTitle)
-                        .foregroundColor(.orange)
-                    Text("No services connected")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyServicesView()
             } else {
                 ForEach(entry.sortedServices.prefix(7), id: \.self) { service in
                     if let metrics = entry.metrics[service] {
                         ServiceCompactView(metrics: metrics)
-                        if service != entry.sortedServices.prefix(7).last {
-                            Spacer()
-                        }
                     }
                 }
             }
