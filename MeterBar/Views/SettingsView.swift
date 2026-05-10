@@ -323,6 +323,8 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            DebugForceUnauthedSection()
         }
         .formStyle(.grouped)
         .frame(minWidth: 450, minHeight: 500)

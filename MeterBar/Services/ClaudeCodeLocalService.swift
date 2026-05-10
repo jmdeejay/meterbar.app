@@ -46,8 +46,10 @@ class ClaudeCodeLocalService: ObservableObject {
     }
 
     /// Apply a snapshot to the published auth state. Pass `nil` to clear.
+    /// Honors `DebugSettings.forceUnauthedClaudeCode` last so a flipped debug
+    /// toggle reliably forces the unauthed UI even when real credentials exist.
     private func applySnapshot(_ snapshot: ClaudeCodeCredentialSnapshot?) {
-        if let snapshot = snapshot {
+        if let snapshot = snapshot, !DebugSettings.shared.forceUnauthedClaudeCode {
             hasAccess = true
             subscriptionType = snapshot.subscriptionType
             rateLimitTier = snapshot.rateLimitTier

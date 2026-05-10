@@ -121,16 +121,13 @@ class CodexCliLocalService: ObservableObject {
     }
 
 
-    /// Check and update access status
+    /// Check and update access status. Honors `DebugSettings.forceUnauthedCodexCli`
+    /// so the debug toggle wins over real on-disk credentials.
     func checkAccess() {
         let token = getAuthToken()
         let hasToken = token != nil
         print("[CodexCliLocalService] checkAccess: authFile=\(authFilePath), hasToken=\(hasToken)")
-        if hasToken {
-            hasAccess = true
-        } else {
-            hasAccess = false
-        }
+        hasAccess = hasToken && !DebugSettings.shared.forceUnauthedCodexCli
     }
 
     // MARK: - Usage Fetching

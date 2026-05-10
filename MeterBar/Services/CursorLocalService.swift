@@ -221,8 +221,10 @@ class CursorLocalService: ObservableObject {
 
     /// Check and update access status
     /// - Parameter forceRescan: If true, will recursively search for database if not found in primary paths
+    /// Honors `DebugSettings.forceUnauthedCursor` so the debug toggle wins over real on-disk credentials.
     func checkAccess(forceRescan: Bool = false) {
-        if let _ = getAccessTokenFromDatabase(forceRescan: forceRescan) {
+        if getAccessTokenFromDatabase(forceRescan: forceRescan) != nil,
+           !DebugSettings.shared.forceUnauthedCursor {
             hasAccess = true
         } else {
             hasAccess = false
