@@ -86,6 +86,8 @@ open MeterBar.xcodeproj
 # Build and run (Cmd+R)
 ```
 
+If you're forking, run `./scripts/personalize-signing.sh --team YOUR_TEAM_ID --bundle com.you.meterbar` first — it rewrites `DEVELOPMENT_TEAM`, `PRODUCT_BUNDLE_IDENTIFIER` (app + widget), and the App Group identifier across the project so the build picks up your own Apple Developer signing identity.
+
 ## Setup
 
 ### Claude Code
