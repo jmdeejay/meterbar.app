@@ -66,8 +66,10 @@ class UsageDataManager: ObservableObject {
                 newMetrics[.claudeCode] = metrics
             } catch {
                 lastError = error
-                // Preserve cached data if available (graceful degradation)
-                if let cachedMetrics = self.metrics[.claudeCode] {
+                // Preserve cached data on transient failures only. A 401 means
+                // the OAuth token is dead - keeping the stale section alive in
+                // the widget would lie to the user.
+                if !isAuthFailure(error), let cachedMetrics = self.metrics[.claudeCode] {
                     newMetrics[.claudeCode] = cachedMetrics
                 }
             }
@@ -92,8 +94,7 @@ class UsageDataManager: ObservableObject {
             } catch {
                 lastError = error
                 print("Failed to fetch Codex CLI metrics: \(error)")
-                // Preserve cached data if available (graceful degradation)
-                if let cachedMetrics = self.metrics[.codexCli] {
+                if !isAuthFailure(error), let cachedMetrics = self.metrics[.codexCli] {
                     newMetrics[.codexCli] = cachedMetrics
                 }
             }
@@ -107,8 +108,7 @@ class UsageDataManager: ObservableObject {
             } catch {
                 lastError = error
                 print("Failed to fetch Cursor metrics: \(error)")
-                // Preserve cached data if available (graceful degradation)
-                if let cachedMetrics = self.metrics[.cursor] {
+                if !isAuthFailure(error), let cachedMetrics = self.metrics[.cursor] {
                     newMetrics[.cursor] = cachedMetrics
                 }
             }
@@ -159,8 +159,7 @@ class UsageDataManager: ObservableObject {
                 do {
                     newMetrics = try await claudeCodeService.fetchUsageMetrics()
                 } catch {
-                    // On individual refresh, preserve cached data if fetch fails
-                    if let cachedMetric = metrics[service] {
+                    if !isAuthFailure(error), let cachedMetric = metrics[service] {
                         newMetrics = cachedMetric
                         lastError = error
                     } else {
@@ -179,8 +178,7 @@ class UsageDataManager: ObservableObject {
                 do {
                     newMetrics = try await codexCliService.fetchUsageMetrics()
                 } catch {
-                    // On individual refresh, preserve cached data if fetch fails
-                    if let cachedMetric = metrics[service] {
+                    if !isAuthFailure(error), let cachedMetric = metrics[service] {
                         newMetrics = cachedMetric
                         lastError = error
                     } else {
@@ -194,8 +192,7 @@ class UsageDataManager: ObservableObject {
                 do {
                     newMetrics = try await cursorService.fetchUsageMetrics()
                 } catch {
-                    // On individual refresh, preserve cached data if fetch fails
-                    if let cachedMetric = metrics[service] {
+                    if !isAuthFailure(error), let cachedMetric = metrics[service] {
                         newMetrics = cachedMetric
                         lastError = error
                     } else {
@@ -211,15 +208,29 @@ class UsageDataManager: ObservableObject {
             if lastError == nil {
                 lastError = error
             }
-            // Preserve existing cached metrics for this service on error
-            if metrics[service] == nil {
-                if let cachedData = loadCachedMetricsFromDisk()[service] {
-                    metrics[service] = cachedData
-                }
+            // On auth failure, drop the section so the widget reflects reality.
+            // On any other failure, fall back to the last good cache.
+            if isAuthFailure(error) {
+                metrics[service] = nil
+                saveCachedData()
+                sharedStore.saveMetrics(metrics)
+            } else if metrics[service] == nil,
+                      let cachedData = loadCachedMetricsFromDisk()[service] {
+                metrics[service] = cachedData
             }
         }
 
         isLoading = false
+    }
+
+    /// Treat a 401 / `.notAuthenticated` as an auth failure. Distinguishing this
+    /// from transient errors lets us drop the cached metrics so the widget
+    /// stops rendering a stale section after an OAuth token expires.
+    private func isAuthFailure(_ error: Error) -> Bool {
+        if let serviceError = error as? ServiceError, case .notAuthenticated = serviceError {
+            return true
+        }
+        return false
     }
 
     private func loadCachedData() {
