@@ -367,8 +367,10 @@ struct CursorServiceRow: View {
             }
             .buttonStyle(.plain)
 
-            // Expanded content — unauthenticated case
-            if isExpanded, !hasAccess {
+            // Expanded content — no metrics available (no credentials, or
+            // credentials present but the most recent refresh failed). Show
+            // the recovery affordances; they're a no-op when already authed.
+            if isExpanded, metrics == nil {
                 Divider()
 
                 Text("Log in to Cursor IDE to enable")
@@ -377,9 +379,7 @@ struct CursorServiceRow: View {
 
                 Button(action: {
                     cursorService.checkAccess()
-                    if cursorService.hasAccess {
-                        Task { await dataManager.refreshAll() }
-                    }
+                    Task { await dataManager.refreshAll() }
                 }) {
                     HStack {
                         Image(systemName: "arrow.clockwise")
@@ -491,8 +491,10 @@ struct ClaudeCodeServiceRow: View {
             }
             .buttonStyle(.plain)
 
-            // Expanded content — unauthenticated case
-            if isExpanded, !hasAccess {
+            // Expanded content — no metrics available (no credentials, or
+            // credentials present but the most recent refresh failed). Show
+            // the recovery affordances; they're a no-op when already authed.
+            if isExpanded, metrics == nil {
                 Divider()
 
                 Text("Log in to Claude Code CLI to enable")
@@ -523,9 +525,7 @@ struct ClaudeCodeServiceRow: View {
 
                     Button(action: {
                         claudeCodeService.checkAccess()
-                        if claudeCodeService.hasAccess {
-                            Task { await dataManager.refreshAll() }
-                        }
+                        Task { await dataManager.refreshAll() }
                     }) {
                         HStack {
                             Image(systemName: "arrow.clockwise")
@@ -642,8 +642,10 @@ struct CodexCliServiceRow: View {
             }
             .buttonStyle(.plain)
 
-            // Expanded content — unauthenticated case
-            if isExpanded, !hasAccess {
+            // Expanded content — no metrics available (no credentials, or
+            // credentials present but the most recent refresh failed). Show
+            // the recovery affordances; they're a no-op when already authed.
+            if isExpanded, metrics == nil {
                 Divider()
 
                 Text("Log in to Codex CLI to enable")
@@ -652,9 +654,7 @@ struct CodexCliServiceRow: View {
 
                 Button(action: {
                     codexCliService.checkAccess()
-                    if codexCliService.hasAccess {
-                        Task { await dataManager.refreshAll() }
-                    }
+                    Task { await dataManager.refreshAll() }
                 }) {
                     HStack {
                         Image(systemName: "arrow.clockwise")
