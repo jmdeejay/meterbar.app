@@ -341,7 +341,7 @@ struct CursorServiceRow: View {
                     // space between the label and the status dot. Otherwise a
                     // plain Spacer pushes the trailing controls right.
                     if !isExpanded, hasAccess, let metrics = metrics, let headline = metrics.limits.first {
-                        CompactProgressBar(percentage: headline.percentage, color: headline.statusColor.color)
+                        UsageProgressBar(percentage: headline.percentage, color: headline.statusColor.color, height: 6, horizontalPadding: 8)
                     } else {
                         Spacer()
                     }
@@ -461,7 +461,7 @@ struct ClaudeCodeServiceRow: View {
                         .foregroundColor(.primary)
 
                     if !isExpanded, hasAccess, let metrics = metrics, let headline = metrics.limits.first {
-                        CompactProgressBar(percentage: headline.percentage, color: headline.statusColor.color)
+                        UsageProgressBar(percentage: headline.percentage, color: headline.statusColor.color, height: 6, horizontalPadding: 8)
                     } else {
                         Spacer()
                     }
@@ -600,7 +600,7 @@ struct CodexCliServiceRow: View {
                         .foregroundColor(.primary)
 
                     if !isExpanded, hasAccess, let metrics = metrics, let headline = metrics.limits.first {
-                        CompactProgressBar(percentage: headline.percentage, color: headline.statusColor.color)
+                        UsageProgressBar(percentage: headline.percentage, color: headline.statusColor.color, height: 6, horizontalPadding: 8)
                     } else {
                         Spacer()
                     }
@@ -736,8 +736,7 @@ struct LimitRow: View {
                     .bold()
             }
 
-            ProgressView(value: min(max(limit.used, 0), limit.total), total: limit.total)
-                .tint(limit.statusColor.color)
+            UsageProgressBar(percentage: limit.percentage, color: limit.statusColor.color)
 
             if let resetTime = limit.resetTime {
                 Text("Resets: \(formatResetTime(resetTime))")
@@ -762,29 +761,5 @@ struct StatusIndicator: View {
         Circle()
             .fill(status.color)
             .frame(width: 8, height: 8)
-    }
-}
-
-// MARK: - Compact Progress Bar (for collapsed headers)
-
-/// Fills the horizontal space between the service label and the trailing
-/// status dot. Sized via GeometryReader so the fill rectangle can be a
-/// fraction of the actual rendered width.
-struct CompactProgressBar: View {
-    let percentage: Double
-    let color: Color
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.gray.opacity(0.3))
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(color)
-                    .frame(width: geo.size.width * CGFloat(min(max(percentage, 0), 100) / 100))
-            }
-        }
-        .frame(height: 6)
-        .padding(.horizontal, 8)
     }
 }

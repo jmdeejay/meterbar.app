@@ -61,9 +61,9 @@ enum UsageStatus {
 
     var color: Color {
         switch self {
-        case .good: return .green
-        case .warning: return .orange
-        case .critical: return .red
+        case .good:     return Color(red:  52/255, green: 199/255, blue:  89/255) // ~system green
+        case .warning:  return Color(red: 255/255, green: 149/255, blue:   0/255) // ~system orange
+        case .critical: return Color(red: 255/255, green:  59/255, blue:  48/255) // ~system red
         }
     }
 }

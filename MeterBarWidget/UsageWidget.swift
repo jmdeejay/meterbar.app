@@ -288,7 +288,7 @@ struct ServiceMiniView: View {
                 WidgetStatusIndicator(status: metrics.overallStatus)
             }
             ForEach(metrics.limits) { limit in
-                MiniLimitRow(label: limit.compactLabel, limit: limit, font: .system(size: 9))
+                MiniLimitRow(label: limit.compactLabel, limit: limit, font: .system(size: 9), barHeight: 4)
             }
         }
     }
@@ -434,7 +434,7 @@ struct MiniLimitRow: View {
     let limit: UsageLimit
     let font: Font
     var showsResetTime: Bool = false
-    var barHeight: CGFloat? = nil
+    var barHeight: CGFloat = 5
     var stackedLabel: Bool = false
 
     var body: some View {
@@ -444,7 +444,7 @@ struct MiniLimitRow: View {
                     .font(font)
                     .lineLimit(1)
                 HStack(spacing: 4) {
-                    progressBar
+                    bar
                     Text("\(Int(limit.percentage))%")
                         .font(font)
                 }
@@ -452,7 +452,7 @@ struct MiniLimitRow: View {
                 HStack(spacing: 4) {
                     Text(label)
                         .font(font)
-                    progressBar
+                    bar
                     Text("\(Int(limit.percentage))%")
                         .font(font)
                 }
@@ -466,23 +466,12 @@ struct MiniLimitRow: View {
         }
     }
 
-    @ViewBuilder
-    private var progressBar: some View {
-        if let barHeight {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.secondary.opacity(0.25))
-                    Capsule()
-                        .fill(limit.statusColor.color)
-                        .frame(width: geo.size.width * (limit.clampedUsed / limit.clampedTotal))
-                }
-            }
-            .frame(height: barHeight)
-        } else {
-            ProgressView(value: limit.clampedUsed, total: limit.clampedTotal)
-                .tint(limit.statusColor.color)
-        }
+    private var bar: some View {
+        UsageProgressBar(
+            percentage: limit.percentage,
+            color: limit.statusColor.color,
+            height: barHeight
+        )
     }
 
     private static func formatResetTime(_ date: Date) -> String {
