@@ -76,20 +76,17 @@ class ClaudeService {
 
         let totalTokens = totalInputTokens + totalOutputTokens
 
-        // Create usage metrics
-        // Note: Anthropic doesn't have fixed "limits" - this shows actual usage
+        // Anthropic doesn't expose a fixed cap — this shows actual usage
+        // scaled against either headroom or a 1M baseline.
         let weeklyUsage = UsageLimit(
+            compactLabel: "W",
+            verboseLabel: "Weekly",
             used: totalTokens,
-            total: max(totalTokens * 1.5, 1000000), // Show relative to usage or 1M baseline
+            total: max(totalTokens * 1.5, 1000000),
             resetTime: Calendar.current.date(byAdding: .day, value: 7, to: startDate)
         )
 
-        return UsageMetrics(
-            service: .claude,
-            sessionLimit: nil, // Anthropic doesn't have session limits
-            weeklyLimit: weeklyUsage,
-            codeReviewLimit: nil
-        )
+        return UsageMetrics(service: .claude, limits: [weeklyUsage])
     }
 }
 

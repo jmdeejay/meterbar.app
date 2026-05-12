@@ -18,7 +18,7 @@ CONFIG="${CONFIG:-Debug}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT="$REPO_ROOT/MeterBar.xcodeproj"
-DERIVED="$REPO_ROOT/build-signed"
+DERIVED="$REPO_ROOT/build"
 APP="$DERIVED/Build/Products/$CONFIG/MeterBar.app"
 INSTALLED_APP="/Applications/MeterBar.app"
 

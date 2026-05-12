@@ -73,20 +73,17 @@ class OpenAIService {
 
         let totalTokens = totalInputTokens + totalOutputTokens
 
-        // Create usage metrics
-        // Note: OpenAI doesn't have fixed "limits" in the usage API - this shows actual usage
+        // OpenAI's usage API has no fixed cap — scale against either headroom
+        // or a 1M baseline.
         let weeklyUsage = UsageLimit(
+            compactLabel: "W",
+            verboseLabel: "Weekly",
             used: totalTokens,
-            total: max(totalTokens * 1.5, 1000000), // Show relative to usage or 1M baseline
+            total: max(totalTokens * 1.5, 1000000),
             resetTime: Calendar.current.date(byAdding: .day, value: 7, to: startDate)
         )
 
-        return UsageMetrics(
-            service: .openai,
-            sessionLimit: nil,
-            weeklyLimit: weeklyUsage,
-            codeReviewLimit: nil
-        )
+        return UsageMetrics(service: .openai, limits: [weeklyUsage])
     }
 }
 

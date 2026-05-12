@@ -167,17 +167,8 @@ struct ServiceRowView: View {
             if isAuthenticated, let metrics = metrics {
                 Divider()
 
-                // Show usage data
-                if let sessionLimit = metrics.sessionLimit {
-                    LimitRow(title: "Session", limit: sessionLimit)
-                }
-
-                if let weeklyLimit = metrics.weeklyLimit {
-                    LimitRow(title: "Weekly", limit: weeklyLimit)
-                }
-
-                if let codeReviewLimit = metrics.codeReviewLimit {
-                    LimitRow(title: "Code Review", limit: codeReviewLimit)
+                ForEach(metrics.limits) { limit in
+                    LimitRow(title: limit.verboseLabel, limit: limit)
                 }
 
                 Text("Updated: \(formatDate(metrics.lastUpdated))")
@@ -260,10 +251,7 @@ struct ServiceRowView: View {
     }
 
     private var headerColor: Color {
-        if isAuthenticated, let metrics = metrics {
-            return metrics.overallStatus.color
-        }
-        return .gray
+        isAuthenticated ? service.brandColor : .gray
     }
 
     private var keyPlaceholder: String {
@@ -349,12 +337,14 @@ struct CursorServiceRow: View {
                         .font(.headline)
                         .foregroundColor(.primary)
 
-                    // Show compact progress bar when collapsed
-                    if !isExpanded, hasAccess, let metrics = metrics, let session = metrics.weeklyLimit {
-                        CompactProgressBar(percentage: session.percentage, color: session.statusColor.color)
+                    // When collapsed, the compact bar takes the full flexible
+                    // space between the label and the status dot. Otherwise a
+                    // plain Spacer pushes the trailing controls right.
+                    if !isExpanded, hasAccess, let metrics = metrics, let headline = metrics.limits.first {
+                        CompactProgressBar(percentage: headline.percentage, color: headline.statusColor.color)
+                    } else {
+                        Spacer()
                     }
-
-                    Spacer()
 
                     if hasAccess, let metrics = metrics {
                         StatusIndicator(status: metrics.overallStatus)
@@ -367,8 +357,10 @@ struct CursorServiceRow: View {
             }
             .buttonStyle(.plain)
 
-            // Expanded content — unauthenticated case
-            if isExpanded, !hasAccess {
+            // Expanded content — no metrics available (no credentials, or
+            // credentials present but the most recent refresh failed). Show
+            // the recovery affordances; they're a no-op when already authed.
+            if isExpanded, metrics == nil {
                 Divider()
 
                 Text("Log in to Cursor IDE to enable")
@@ -377,9 +369,7 @@ struct CursorServiceRow: View {
 
                 Button(action: {
                     cursorService.checkAccess()
-                    if cursorService.hasAccess {
-                        Task { await dataManager.refreshAll() }
-                    }
+                    Task { await dataManager.refreshAll() }
                 }) {
                     HStack {
                         Image(systemName: "arrow.clockwise")
@@ -394,8 +384,8 @@ struct CursorServiceRow: View {
             if isExpanded, hasAccess, let metrics = metrics {
                 Divider()
 
-                if let weeklyLimit = metrics.weeklyLimit {
-                    LimitRow(title: "Monthly", limit: weeklyLimit)
+                ForEach(metrics.limits) { limit in
+                    LimitRow(title: limit.verboseLabel, limit: limit)
                 }
 
                 if let subscriptionType = cursorService.subscriptionType {
@@ -424,10 +414,7 @@ struct CursorServiceRow: View {
     }
 
     private var headerColor: Color {
-        if hasAccess, let metrics = metrics {
-            return metrics.overallStatus.color
-        }
-        return .gray
+        hasAccess ? ServiceType.cursor.brandColor : .gray
     }
 
     private func formatDate(_ date: Date) -> String {
@@ -473,12 +460,11 @@ struct ClaudeCodeServiceRow: View {
                         .font(.headline)
                         .foregroundColor(.primary)
 
-                    // Show compact progress bar when collapsed
-                    if !isExpanded, hasAccess, let metrics = metrics, let session = metrics.sessionLimit {
-                        CompactProgressBar(percentage: session.percentage, color: session.statusColor.color)
+                    if !isExpanded, hasAccess, let metrics = metrics, let headline = metrics.limits.first {
+                        CompactProgressBar(percentage: headline.percentage, color: headline.statusColor.color)
+                    } else {
+                        Spacer()
                     }
-
-                    Spacer()
 
                     if hasAccess, let metrics = metrics {
                         StatusIndicator(status: metrics.overallStatus)
@@ -491,8 +477,10 @@ struct ClaudeCodeServiceRow: View {
             }
             .buttonStyle(.plain)
 
-            // Expanded content — unauthenticated case
-            if isExpanded, !hasAccess {
+            // Expanded content — no metrics available (no credentials, or
+            // credentials present but the most recent refresh failed). Show
+            // the recovery affordances; they're a no-op when already authed.
+            if isExpanded, metrics == nil {
                 Divider()
 
                 Text("Log in to Claude Code CLI to enable")
@@ -523,9 +511,7 @@ struct ClaudeCodeServiceRow: View {
 
                     Button(action: {
                         claudeCodeService.checkAccess()
-                        if claudeCodeService.hasAccess {
-                            Task { await dataManager.refreshAll() }
-                        }
+                        Task { await dataManager.refreshAll() }
                     }) {
                         HStack {
                             Image(systemName: "arrow.clockwise")
@@ -548,16 +534,8 @@ struct ClaudeCodeServiceRow: View {
             if isExpanded, hasAccess, let metrics = metrics {
                 Divider()
 
-                if let sessionLimit = metrics.sessionLimit {
-                    LimitRow(title: "Session (5h)", limit: sessionLimit)
-                }
-
-                if let weeklyLimit = metrics.weeklyLimit {
-                    LimitRow(title: "All Models (7d)", limit: weeklyLimit)
-                }
-
-                if let sonnetLimit = metrics.codeReviewLimit {
-                    LimitRow(title: "Sonnet (7d)", limit: sonnetLimit)
+                ForEach(metrics.limits) { limit in
+                    LimitRow(title: limit.verboseLabel, limit: limit)
                 }
 
                 if let subscriptionType = claudeCodeService.subscriptionType {
@@ -586,10 +564,7 @@ struct ClaudeCodeServiceRow: View {
     }
 
     private var headerColor: Color {
-        if hasAccess, let metrics = metrics {
-            return metrics.overallStatus.color
-        }
-        return .gray
+        hasAccess ? ServiceType.claudeCode.brandColor : .gray
     }
 
     private func formatDate(_ date: Date) -> String {
@@ -624,12 +599,11 @@ struct CodexCliServiceRow: View {
                         .font(.headline)
                         .foregroundColor(.primary)
 
-                    // Show compact progress bar when collapsed
-                    if !isExpanded, hasAccess, let metrics = metrics, let session = metrics.sessionLimit {
-                        CompactProgressBar(percentage: session.percentage, color: session.statusColor.color)
+                    if !isExpanded, hasAccess, let metrics = metrics, let headline = metrics.limits.first {
+                        CompactProgressBar(percentage: headline.percentage, color: headline.statusColor.color)
+                    } else {
+                        Spacer()
                     }
-
-                    Spacer()
 
                     if hasAccess, let metrics = metrics {
                         StatusIndicator(status: metrics.overallStatus)
@@ -642,8 +616,10 @@ struct CodexCliServiceRow: View {
             }
             .buttonStyle(.plain)
 
-            // Expanded content — unauthenticated case
-            if isExpanded, !hasAccess {
+            // Expanded content — no metrics available (no credentials, or
+            // credentials present but the most recent refresh failed). Show
+            // the recovery affordances; they're a no-op when already authed.
+            if isExpanded, metrics == nil {
                 Divider()
 
                 Text("Log in to Codex CLI to enable")
@@ -652,9 +628,7 @@ struct CodexCliServiceRow: View {
 
                 Button(action: {
                     codexCliService.checkAccess()
-                    if codexCliService.hasAccess {
-                        Task { await dataManager.refreshAll() }
-                    }
+                    Task { await dataManager.refreshAll() }
                 }) {
                     HStack {
                         Image(systemName: "arrow.clockwise")
@@ -669,16 +643,8 @@ struct CodexCliServiceRow: View {
             if isExpanded, hasAccess, let metrics = metrics {
                 Divider()
 
-                if let sessionLimit = metrics.sessionLimit {
-                    LimitRow(title: "Session (5h)", limit: sessionLimit)
-                }
-
-                if let weeklyLimit = metrics.weeklyLimit {
-                    LimitRow(title: "Weekly Limit", limit: weeklyLimit)
-                }
-
-                if let codeReviewLimit = metrics.codeReviewLimit {
-                    LimitRow(title: "Code Review", limit: codeReviewLimit)
+                ForEach(metrics.limits) { limit in
+                    LimitRow(title: limit.verboseLabel, limit: limit)
                 }
 
                 if let subscriptionType = codexCliService.subscriptionType {
@@ -707,10 +673,7 @@ struct CodexCliServiceRow: View {
     }
 
     private var headerColor: Color {
-        if hasAccess, let metrics = metrics {
-            return metrics.overallStatus.color
-        }
-        return .gray
+        hasAccess ? ServiceType.codexCli.brandColor : .gray
     }
 
     private func formatDate(_ date: Date) -> String {
@@ -729,7 +692,7 @@ struct ServiceCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Image(systemName: metrics.service.iconName)
-                    .foregroundColor(metrics.overallStatus.color)
+                    .foregroundColor(metrics.service.brandColor)
                 Text(metrics.service.displayName)
                     .font(.headline)
                 Spacer()
@@ -738,16 +701,8 @@ struct ServiceCard: View {
 
             Divider()
 
-            if let sessionLimit = metrics.sessionLimit {
-                LimitRow(title: "Session", limit: sessionLimit)
-            }
-
-            if let weeklyLimit = metrics.weeklyLimit {
-                LimitRow(title: "Weekly", limit: weeklyLimit)
-            }
-
-            if let codeReviewLimit = metrics.codeReviewLimit {
-                LimitRow(title: "Code Review", limit: codeReviewLimit)
+            ForEach(metrics.limits) { limit in
+                LimitRow(title: limit.verboseLabel, limit: limit)
             }
 
             Text("Updated: \(formatDate(metrics.lastUpdated))")
@@ -788,6 +743,7 @@ struct LimitRow: View {
                 Text("Resets: \(formatResetTime(resetTime))")
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
     }
@@ -811,21 +767,24 @@ struct StatusIndicator: View {
 
 // MARK: - Compact Progress Bar (for collapsed headers)
 
+/// Fills the horizontal space between the service label and the trailing
+/// status dot. Sized via GeometryReader so the fill rectangle can be a
+/// fraction of the actual rendered width.
 struct CompactProgressBar: View {
     let percentage: Double
     let color: Color
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            // Background track
-            RoundedRectangle(cornerRadius: 2)
-                .fill(Color.gray.opacity(0.3))
-                .frame(width: 40, height: 4)
-
-            // Progress fill
-            RoundedRectangle(cornerRadius: 2)
-                .fill(color)
-                .frame(width: 40 * min(max(percentage, 0), 100) / 100, height: 4)
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.gray.opacity(0.3))
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(color)
+                    .frame(width: geo.size.width * CGFloat(min(max(percentage, 0), 100) / 100))
+            }
         }
+        .frame(height: 6)
+        .padding(.horizontal, 8)
     }
 }

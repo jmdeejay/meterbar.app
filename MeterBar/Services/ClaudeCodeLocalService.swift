@@ -5,12 +5,20 @@ import Security
 
 /// Service for fetching Claude Code usage data from `https://api.anthropic.com/api/oauth/usage`.
 ///
-/// Authentication on every refresh is resolved exclusively from local files under `~/.claude/`.
-/// The macOS Keychain item `Claude Code-credentials` is *only* read by the user-initiated
-/// `importCredentialsFromKeychain()` bridge (see below), which copies the OAuth blob to
-/// `~/.claude/.credentials.json` once and never touches the keychain again until the user
-/// explicitly clicks Import again. This avoids the original problem (implicit cross-app keychain
-/// reads on every fetch — incompatible with App Sandbox and lacking user consent). See issue #14.
+/// Steady-state fetches resolve credentials from `~/.claude/.credentials.json`. The macOS
+/// Keychain item `Claude Code-credentials` is consulted on two paths:
+///   1. User-initiated, via `importCredentialsFromKeychain()` — first call triggers the
+///      cross-app consent prompt.
+///   2. Automatic, via `reimportFromKeychainIfNeeded(...)` — when the file's access token
+///      is within 60s of expiry, or on a 401 from the usage endpoint. We mirror the
+///      keychain blob into the file only if the keychain's `expiresAt` is strictly newer.
+///
+/// The automatic path was originally avoided (see prior versions / issue #14) to dodge
+/// implicit cross-app keychain reads on every fetch. We accept it now because (a) it's
+/// gated on near-expiry so the read rate is ~1/8h not per-tick, and (b) once the user has
+/// picked "Always Allow" on the initial Import, subsequent reads are silent. Letting Claude
+/// Code own the OAuth refresh ceremony (rather than racing it from MeterBar) is what keeps
+/// both clients' sessions alive at the same time.
 class ClaudeCodeLocalService: ObservableObject {
     static let shared = ClaudeCodeLocalService()
 
@@ -66,17 +74,16 @@ class ClaudeCodeLocalService: ObservableObject {
         applySnapshot(currentSnapshot())
     }
 
-    // MARK: - One-time Keychain Import
+    // MARK: - Keychain Bridge
 
-    /// User-initiated bridge for users whose Claude Code build only writes its OAuth token
-    /// to the macOS Keychain (the default on macOS). Reads the keychain blob ONCE — only
-    /// when this method is called from an explicit UI action — and writes it verbatim to
-    /// `~/.claude/.credentials.json`. The rest of the service continues to read from the
-    /// file path; the keychain is never consulted again until the user clicks Import once
-    /// more (e.g. after a token rotation). The first call triggers macOS's standard
-    /// cross-app keychain consent prompt.
-    @discardableResult
-    func importCredentialsFromKeychain() -> Result<Void, ServiceError> {
+    /// Authoritative source of fresh credentials. Claude Code's CLI owns the
+    /// OAuth refresh ceremony — it writes new tokens to its Keychain entry
+    /// every time it runs and the access token is near expiry. MeterBar mirrors
+    /// that entry into `~/.claude/.credentials.json` and reads from there for
+    /// regular fetches, falling back to the Keychain only when the file copy
+    /// has gone stale (and even then, only if the Keychain has actually
+    /// progressed past the file's `expiresAt`).
+    private func readKeychainBlob() -> Result<Data, ServiceError> {
         let query: [String: Any] = [
             kSecClass as String:        kSecClassGenericPassword,
             kSecAttrService as String:  "Claude Code-credentials",
@@ -88,7 +95,10 @@ class ClaudeCodeLocalService: ObservableObject {
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         switch status {
         case errSecSuccess:
-            break
+            guard let data = item as? Data else {
+                return .failure(.apiError("Unexpected keychain data format."))
+            }
+            return .success(data)
         case errSecItemNotFound:
             return .failure(.apiError("No Claude Code credentials in Keychain. Run `claude` in Terminal to log in first."))
         case errSecUserCanceled, errSecAuthFailed:
@@ -96,9 +106,16 @@ class ClaudeCodeLocalService: ObservableObject {
         default:
             return .failure(.apiError("Keychain error \(status)"))
         }
+    }
 
-        guard let data = item as? Data else {
-            return .failure(.apiError("Unexpected keychain data format."))
+    @discardableResult
+    func importCredentialsFromKeychain() -> Result<Void, ServiceError> {
+        let data: Data
+        switch readKeychainBlob() {
+        case .success(let d):
+            data = d
+        case .failure(let err):
+            return .failure(err)
         }
 
         switch ClaudeCodeKeychainImport.importCredentials(
@@ -115,12 +132,49 @@ class ClaudeCodeLocalService: ObservableObject {
         }
     }
 
+    // MARK: - Automatic Keychain Re-import
+
+    /// Window before expiry within which we'll proactively re-read the keychain
+    /// rather than letting the next fetch trip on a stale access token.
+    private let proactiveRefreshLeeway: TimeInterval = 60
+    private func reimportFromKeychainIfNeeded(_ snapshot: ClaudeCodeCredentialSnapshot, force: Bool = false) async -> ClaudeCodeCredentialSnapshot? {
+        if !force {
+            if let expiresAt = snapshot.expiresAt,
+               expiresAt.timeIntervalSinceNow > proactiveRefreshLeeway {
+                return snapshot
+            }
+        }
+
+        let keychainData: Data
+        switch readKeychainBlob() {
+        case .success(let d): keychainData = d
+        case .failure:        return nil
+        }
+
+        guard let keychainSnapshot = ClaudeCodeCredentialResolver.parseCredentialsFile(data: keychainData) else {
+            return nil
+        }
+
+        // Only mirror when the keychain has actually moved past our file otherwise we'd loop forever using the same expired token.
+        let isFresher: Bool
+        switch (keychainSnapshot.expiresAt, snapshot.expiresAt) {
+        case (.some(let kc), .some(let f)): isFresher = kc > f
+        case (.some, .none):                isFresher = true
+        case (.none, _):                    isFresher = false
+        }
+        if !isFresher { return nil }
+
+        _ = ClaudeCodeKeychainImport.importCredentials(
+            from: keychainData,
+            homeDirectory: getRealHomeDirectory()
+        )
+        return currentSnapshot() ?? keychainSnapshot
+    }
+
     // MARK: - Usage Fetching
 
     func fetchUsageMetrics() async throws -> UsageMetrics {
-        let snapshot = currentSnapshot()
-
-        guard let snapshot = snapshot else {
+        guard let initialSnapshot = currentSnapshot() else {
             let error = ServiceError.notAuthenticated
             await MainActor.run {
                 self.applySnapshot(nil)
@@ -129,10 +183,23 @@ class ClaudeCodeLocalService: ObservableObject {
             throw error
         }
 
+        // Proactive re-import — if our cached access token is about to expire
+        guard let snapshot = await reimportFromKeychainIfNeeded(initialSnapshot) else {
+            await MainActor.run {
+                self.applySnapshot(nil)
+                self.lastError = ServiceError.notAuthenticated
+            }
+            throw ServiceError.notAuthenticated
+        }
+
         await MainActor.run {
             self.applySnapshot(snapshot)
         }
 
+        return try await performUsageRequest(snapshot: snapshot, allowRefreshRetry: true)
+    }
+
+    private func performUsageRequest(snapshot: ClaudeCodeCredentialSnapshot, allowRefreshRetry: Bool) async throws -> UsageMetrics {
         guard let url = URL(string: usageEndpoint) else {
             throw ServiceError.apiError("Invalid usage endpoint URL")
         }
@@ -153,6 +220,12 @@ class ClaudeCodeLocalService: ObservableObject {
             }
 
             if httpResponse.statusCode == 401 {
+                // Reactive re-import: the proactive path may have skipped (no expiresAt) or the token died earlier than the stamp claimed.
+                // Force a keychain check and retry once.
+                if allowRefreshRetry, let refreshed = await reimportFromKeychainIfNeeded(snapshot, force: true) {
+                    await MainActor.run { self.applySnapshot(refreshed) }
+                    return try await performUsageRequest(snapshot: refreshed, allowRefreshRetry: false)
+                }
                 await MainActor.run {
                     self.applySnapshot(nil)
                     self.lastError = ServiceError.notAuthenticated
@@ -173,36 +246,34 @@ class ClaudeCodeLocalService: ObservableObject {
                 self.lastError = nil
             }
 
-            // Session limit = 5-hour window
             let sessionLimit = UsageLimit(
+                compactLabel: "S",
+                verboseLabel: "Session (5h)",
                 used: usageResponse.fiveHour.utilization,
                 total: 100.0,
                 resetTime: usageResponse.fiveHour.resetsAt
             )
 
-            // Weekly limit = 7-day window (all models)
             let weeklyLimit = UsageLimit(
+                compactLabel: "W",
+                verboseLabel: "All Models (7d)",
                 used: usageResponse.sevenDay.utilization,
                 total: 100.0,
                 resetTime: usageResponse.sevenDay.resetsAt
             )
 
-            // Sonnet-only weekly limit (if available)
-            var sonnetLimit: UsageLimit? = nil
+            var limits: [UsageLimit] = [sessionLimit, weeklyLimit]
             if let sonnet = usageResponse.sevenDaySonnet {
-                sonnetLimit = UsageLimit(
+                limits.append(UsageLimit(
+                    compactLabel: "Sn",
+                    verboseLabel: "Sonnet (7d)",
                     used: sonnet.utilization,
                     total: 100.0,
                     resetTime: sonnet.resetsAt
-                )
+                ))
             }
 
-            return UsageMetrics(
-                service: .claudeCode,
-                sessionLimit: sessionLimit,
-                weeklyLimit: weeklyLimit,
-                codeReviewLimit: sonnetLimit
-            )
+            return UsageMetrics(service: .claudeCode, limits: limits)
         } catch let urlError as URLError {
             let errorMessage: String
             switch urlError.code {
@@ -233,6 +304,8 @@ class ClaudeCodeLocalService: ObservableObject {
 /// Snapshot of the credentials resolved from `~/.claude/` config files.
 struct ClaudeCodeCredentialSnapshot: Equatable {
     let token: String
+    let refreshToken: String?
+    let expiresAt: Date?
     let subscriptionType: String?
     let rateLimitTier: String?
 }
@@ -267,14 +340,17 @@ enum ClaudeCodeCredentialResolver {
 
         return ClaudeCodeCredentialSnapshot(
             token: token,
+            refreshToken: credentialsSnapshot?.refreshToken,
+            expiresAt: credentialsSnapshot?.expiresAt,
             subscriptionType: subscriptionType,
             rateLimitTier: rateLimitTier
         )
     }
 
     /// Decode `~/.claude/.credentials.json`. Expected shape mirrors what Claude Code writes
-    /// on platforms without a system Keychain: a `claudeAiOauth` object with `accessToken`
-    /// and optional `subscriptionType` / `rateLimitTier` metadata.
+    /// on platforms without a system Keychain: a `claudeAiOauth` object with `accessToken`,
+    /// the long-lived `refreshToken`, an `expiresAt` epoch-millis stamp, and optional
+    /// `subscriptionType` / `rateLimitTier` metadata.
     static func parseCredentialsFile(data: Data) -> ClaudeCodeCredentialSnapshot? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let oauth = object["claudeAiOauth"] as? [String: Any],
@@ -282,8 +358,17 @@ enum ClaudeCodeCredentialResolver {
               !token.isEmpty else {
             return nil
         }
+        let refreshToken = (oauth["refreshToken"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let expiresAt: Date? = {
+            if let ms = oauth["expiresAt"] as? Double {
+                return Date(timeIntervalSince1970: ms / 1000.0)
+            }
+            return nil
+        }()
         return ClaudeCodeCredentialSnapshot(
             token: token,
+            refreshToken: refreshToken,
+            expiresAt: expiresAt,
             subscriptionType: oauth["subscriptionType"] as? String,
             rateLimitTier: oauth["rateLimitTier"] as? String
         )

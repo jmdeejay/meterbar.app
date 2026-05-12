@@ -38,7 +38,7 @@ struct Usage: ParsableCommand {
 
         let filtered: [String: ServiceMetrics]
         if let provider = provider?.lowercased() {
-            filtered = metrics.filter { $0.key.lowercased().contains(provider) }
+            filtered = metrics.filter { Self.matchesProvider($0.key, query: provider) }
         } else {
             filtered = metrics
         }
@@ -50,34 +50,44 @@ struct Usage: ParsableCommand {
         }
     }
 
+    /// Cache key shared with the main app. Bumped to `_v2` after `UsageMetrics`
+    /// switched from a fixed `sessionLimit/weeklyLimit/codeReviewLimit` triplet
+    /// to an ordered `[UsageLimit]` array. Must stay in sync with
+    /// `SharedDataStore.metricsKey` and `UsageDataManager.cacheKey`.
+    private static let cacheKey = "cached_usage_metrics_v2"
+
     private func loadCachedMetrics() -> [String: ServiceMetrics] {
-        // Try app group container first
         let containerURL = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: "group.com.jmdeejay.meterbar"
         )
 
-        var metricsPath: URL?
-
         if let containerURL = containerURL {
-            metricsPath = containerURL.appendingPathComponent("cached_usage_metrics.json")
-        }
-
-        // Fallback to UserDefaults cache
-        if metricsPath == nil || !FileManager.default.fileExists(atPath: metricsPath!.path) {
-            if let data = UserDefaults.standard.data(forKey: "cached_usage_metrics"),
+            let path = containerURL.appendingPathComponent("\(Self.cacheKey).json")
+            if FileManager.default.fileExists(atPath: path.path),
+               let data = try? Data(contentsOf: path),
                let decoded = try? JSONDecoder().decode([String: ServiceMetrics].self, from: data) {
                 return decoded
             }
-            return [:]
         }
 
-        guard let path = metricsPath,
-              let data = try? Data(contentsOf: path),
-              let decoded = try? JSONDecoder().decode([String: ServiceMetrics].self, from: data) else {
-            return [:]
+        if let data = UserDefaults.standard.data(forKey: Self.cacheKey),
+           let decoded = try? JSONDecoder().decode([String: ServiceMetrics].self, from: data) {
+            return decoded
         }
+        return [:]
+    }
 
-        return decoded
+    static func matchesProvider(_ key: String, query: String) -> Bool {
+        let lowered = key.lowercased()
+        if lowered.contains(query) { return true }
+        switch query {
+        case "openai", "chatgpt":
+            return lowered == "codex cli" || lowered == "openai"
+        case "anthropic", "claude":
+            return lowered.contains("claude")
+        default:
+            return false
+        }
     }
 
     private func printJSON(_ metrics: [String: ServiceMetrics]) {
@@ -99,14 +109,8 @@ struct Usage: ParsableCommand {
             let displayName = service.replacingOccurrences(of: "_", with: " ").capitalized
             print("▸ \(displayName)")
 
-            if let session = metric.sessionLimit {
-                printLimit("  Session", session)
-            }
-            if let weekly = metric.weeklyLimit {
-                printLimit("  Weekly", weekly)
-            }
-            if let codeReview = metric.codeReviewLimit {
-                printLimit("  Code Review", codeReview)
+            for limit in metric.limits {
+                printLimit("  \(limit.verboseLabel)", limit)
             }
             print()
         }
@@ -266,19 +270,19 @@ struct Cost: ParsableCommand {
 // MARK: - Models
 
 struct ServiceMetrics: Codable {
-    let sessionLimit: UsageLimit?
-    let weeklyLimit: UsageLimit?
-    let codeReviewLimit: UsageLimit?
+    let limits: [UsageLimit]
 }
 
 struct UsageLimit: Codable {
-    let used: Int
-    let total: Int
+    let compactLabel: String
+    let verboseLabel: String
+    let used: Double
+    let total: Double
     let resetTime: Date?
 
     var percentage: Double {
         guard total > 0 else { return 0 }
-        return (Double(used) / Double(total)) * 100
+        return (used / total) * 100
     }
 }
 

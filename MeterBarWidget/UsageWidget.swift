@@ -20,19 +20,11 @@ enum ServiceType: String, Codable, CaseIterable, Identifiable {
     }
 
     var compactDisplayName: String {
-        ServiceLabels.compactDisplayName(for: rawValue)
-    }
-
-    func sessionLabel(verbose: Bool) -> String {
-        ServiceLabels.sessionLabel(for: rawValue, verbose: verbose)
-    }
-
-    func weeklyLabel(verbose: Bool) -> String {
-        ServiceLabels.weeklyLabel(for: rawValue, verbose: verbose)
-    }
-
-    func codeReviewLabel(verbose: Bool) -> String {
-        ServiceLabels.codeReviewLabel(for: rawValue, verbose: verbose)
+        switch self {
+        case .claudeCode: return "Claude"
+        case .codexCli:   return "OpenAI"
+        case .cursor:     return "Cursor"
+        }
     }
 
     var iconName: String {
@@ -66,10 +58,28 @@ enum UsageStatus {
     }
 }
 
-struct UsageLimit: Codable, Equatable {
+struct UsageLimit: Codable, Equatable, Identifiable {
+    let id: UUID
+    let compactLabel: String
+    let verboseLabel: String
     let used: Double
     let total: Double
     let resetTime: Date?
+
+    init(
+        compactLabel: String,
+        verboseLabel: String,
+        used: Double,
+        total: Double,
+        resetTime: Date? = nil
+    ) {
+        self.id = UUID()
+        self.compactLabel = compactLabel
+        self.verboseLabel = verboseLabel
+        self.used = used
+        self.total = total
+        self.resetTime = resetTime
+    }
 
     var percentage: Double {
         guard total > 0 else { return 0 }
@@ -110,30 +120,22 @@ struct UsageLimit: Codable, Equatable {
 struct UsageMetrics: Codable, Identifiable {
     let id: UUID
     let service: ServiceType
-    let sessionLimit: UsageLimit?
-    let weeklyLimit: UsageLimit?
-    let codeReviewLimit: UsageLimit?
+    let limits: [UsageLimit]
     let lastUpdated: Date
 
     init(
         service: ServiceType,
-        sessionLimit: UsageLimit? = nil,
-        weeklyLimit: UsageLimit? = nil,
-        codeReviewLimit: UsageLimit? = nil,
+        limits: [UsageLimit] = [],
         lastUpdated: Date = Date()
     ) {
         self.id = UUID()
         self.service = service
-        self.sessionLimit = sessionLimit
-        self.weeklyLimit = weeklyLimit
-        self.codeReviewLimit = codeReviewLimit
+        self.limits = limits
         self.lastUpdated = lastUpdated
     }
 
     var overallStatus: UsageStatus {
-        let limits = [sessionLimit, weeklyLimit, codeReviewLimit].compactMap { $0 }
         guard !limits.isEmpty else { return .good }
-
         if limits.contains(where: { $0.isAtLimit }) {
             return .critical
         } else if limits.contains(where: { $0.isNearLimit }) {
@@ -143,9 +145,7 @@ struct UsageMetrics: Codable, Identifiable {
         }
     }
 
-    var hasData: Bool {
-        return sessionLimit != nil || weeklyLimit != nil || codeReviewLimit != nil
-    }
+    var hasData: Bool { !limits.isEmpty }
 }
 
 // MARK: - Widget
@@ -179,15 +179,15 @@ struct UsageWidgetProvider: TimelineProvider {
             metrics: [
                 .codexCli: UsageMetrics(
                     service: .codexCli,
-                    weeklyLimit: UsageLimit(used: 30, total: 100, resetTime: nil)
+                    limits: [UsageLimit(compactLabel: "W", verboseLabel: "Weekly", used: 30, total: 100)]
                 ),
                 .cursor: UsageMetrics(
                     service: .cursor,
-                    weeklyLimit: UsageLimit(used: 50, total: 100, resetTime: nil)
+                    limits: [UsageLimit(compactLabel: "M", verboseLabel: "Monthly", used: 50, total: 100)]
                 ),
                 .claudeCode: UsageMetrics(
                     service: .claudeCode,
-                    weeklyLimit: UsageLimit(used: 90, total: 100, resetTime: nil)
+                    limits: [UsageLimit(compactLabel: "S", verboseLabel: "Session (5h)", used: 90, total: 100)]
                 )
             ]
         )
@@ -287,14 +287,8 @@ struct ServiceMiniView: View {
                 Spacer(minLength: 2)
                 WidgetStatusIndicator(status: metrics.overallStatus)
             }
-            if let session = metrics.sessionLimit {
-                MiniLimitRow(label: metrics.service.sessionLabel(verbose: false), limit: session, font: .system(size: 9))
-            }
-            if let weekly = metrics.weeklyLimit {
-                MiniLimitRow(label: metrics.service.weeklyLabel(verbose: false), limit: weekly, font: .system(size: 9))
-            }
-            if let codeReview = metrics.codeReviewLimit {
-                MiniLimitRow(label: metrics.service.codeReviewLabel(verbose: false), limit: codeReview, font: .system(size: 9))
+            ForEach(metrics.limits) { limit in
+                MiniLimitRow(label: limit.compactLabel, limit: limit, font: .system(size: 9))
             }
         }
     }
@@ -366,7 +360,7 @@ struct LargeWidgetView: View {
     let entry: UsageWidgetEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: 12) {
             if entry.metrics.isEmpty {
                 EmptyServicesView()
             } else {
@@ -404,14 +398,8 @@ struct ServiceColumnView: View {
                 Spacer(minLength: 2)
                 WidgetStatusIndicator(status: metrics.overallStatus)
             }
-            if let session = metrics.sessionLimit {
-                MiniLimitRow(label: metrics.service.sessionLabel(verbose: true), limit: session, font: .system(size: 10), stackedLabel: true)
-            }
-            if let weekly = metrics.weeklyLimit {
-                MiniLimitRow(label: metrics.service.weeklyLabel(verbose: true), limit: weekly, font: .system(size: 10), stackedLabel: true)
-            }
-            if let codeReview = metrics.codeReviewLimit {
-                MiniLimitRow(label: metrics.service.codeReviewLabel(verbose: true), limit: codeReview, font: .system(size: 10), stackedLabel: true)
+            ForEach(metrics.limits) { limit in
+                MiniLimitRow(label: limit.verboseLabel, limit: limit, font: .system(size: 10), stackedLabel: true)
             }
         }
     }
@@ -434,14 +422,8 @@ struct ServiceCompactView: View {
                 WidgetStatusIndicator(status: metrics.overallStatus)
             }
 
-            if let session = metrics.sessionLimit {
-                MiniLimitRow(label: metrics.service.sessionLabel(verbose: true), limit: session, font: .caption, showsResetTime: true, barHeight: 7)
-            }
-            if let weekly = metrics.weeklyLimit {
-                MiniLimitRow(label: metrics.service.weeklyLabel(verbose: true), limit: weekly, font: .caption, showsResetTime: true, barHeight: 7)
-            }
-            if let codeReview = metrics.codeReviewLimit {
-                MiniLimitRow(label: metrics.service.codeReviewLabel(verbose: true), limit: codeReview, font: .caption, showsResetTime: true, barHeight: 7)
+            ForEach(metrics.limits) { limit in
+                MiniLimitRow(label: limit.verboseLabel, limit: limit, font: .caption, showsResetTime: true, barHeight: 7)
             }
         }
     }
@@ -479,6 +461,7 @@ struct MiniLimitRow: View {
                 Text("Resets: \(Self.formatResetTime(reset))")
                     .font(.caption2)
                     .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
     }
@@ -525,16 +508,8 @@ struct ServiceDetailView: View {
                 WidgetStatusIndicator(status: metrics.overallStatus)
             }
 
-            if let sessionLimit = metrics.sessionLimit {
-                LimitDetailView(title: "Session", limit: sessionLimit)
-            }
-
-            if let weeklyLimit = metrics.weeklyLimit {
-                LimitDetailView(title: "Weekly", limit: weeklyLimit)
-            }
-
-            if let codeReviewLimit = metrics.codeReviewLimit {
-                LimitDetailView(title: "Code Review", limit: codeReviewLimit)
+            ForEach(metrics.limits) { limit in
+                LimitDetailView(title: limit.verboseLabel, limit: limit)
             }
         }
         .padding()
