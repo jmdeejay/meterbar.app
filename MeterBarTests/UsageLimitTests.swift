@@ -2,8 +2,12 @@ import XCTest
 @testable import MeterBar
 
 final class UsageLimitTests: XCTestCase {
+    private func makeLimit(used: Double, total: Double) -> UsageLimit {
+        UsageLimit(compactLabel: "T", verboseLabel: "Test", used: used, total: total, resetTime: nil)
+    }
+
     func testPercentageAndRemainingValues() {
-        let limit = UsageLimit(used: 25, total: 100, resetTime: nil)
+        let limit = makeLimit(used: 25, total: 100)
 
         XCTAssertEqual(limit.percentage, 25, accuracy: 0.01)
         XCTAssertEqual(limit.remaining, 75, accuracy: 0.01)
@@ -13,8 +17,8 @@ final class UsageLimitTests: XCTestCase {
     }
 
     func testClampsPercentageAtBounds() {
-        let overLimit = UsageLimit(used: 120, total: 100, resetTime: nil)
-        let zeroTotal = UsageLimit(used: 50, total: 0, resetTime: nil)
+        let overLimit = makeLimit(used: 120, total: 100)
+        let zeroTotal = makeLimit(used: 50, total: 0)
 
         XCTAssertEqual(overLimit.percentage, 100, accuracy: 0.01)
         XCTAssertEqual(overLimit.remaining, 0, accuracy: 0.01)
@@ -28,7 +32,7 @@ final class UsageLimitTests: XCTestCase {
     }
 
     func testWarningThreshold() {
-        let nearLimit = UsageLimit(used: 85, total: 100, resetTime: nil)
+        let nearLimit = makeLimit(used: 85, total: 100)
 
         XCTAssertTrue(nearLimit.isNearLimit)
         XCTAssertFalse(nearLimit.isAtLimit)

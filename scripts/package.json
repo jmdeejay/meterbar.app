@@ -1,10 +1,12 @@
 {
-  "name": "quotaguard-scripts",
+  "name": "meterbar-scripts",
   "private": true,
   "scripts": {
-    "social-preview": "bun run generate-social-preview.ts"
+    "generate-icons": "npx tsx generate-icons.ts",
+    "social-preview": "npx tsx generate-social-preview.ts"
   },
   "devDependencies": {
-    "playwright": "1.57.0"
+    "playwright": "^1.57.0",
+    "tsx": "^4.21.0"
   }
 }

@@ -1,4 +1,4 @@
-# Quota Guard
+# MeterBar
 
 Codex-specific entry point. Documentation in `.agent/`.
 

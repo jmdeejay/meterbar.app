@@ -1,4 +1,4 @@
-# Quota Guard
+# MeterBar
 
 This file provides entry points for AI agents.
 

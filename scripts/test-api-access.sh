@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Test API Access for QuotaGuard
+# Test API Access for MeterBar
 #
 # This script runs the API integration tests to verify that you can
 # fetch usage data from your Claude, OpenAI, Cursor, and Claude Code subscriptions.

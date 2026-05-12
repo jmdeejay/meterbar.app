@@ -1,4 +1,4 @@
-# Quota Guard
+# MeterBar
 
 Claude-specific entry point. Documentation in `.agent/`.
 

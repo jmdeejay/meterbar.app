@@ -54,7 +54,7 @@ struct UsageLimit: Codable, Equatable, Identifiable {
     }
 }
 
-enum UsageStatus {
+enum UsageStatus: Equatable {
     case good
     case warning
     case critical

@@ -1,9 +1,17 @@
 #!/usr/bin/env swift
 //
 // APIAccessTest.swift
-// QuotaGuard
+// MeterBar
 //
-// Standalone script to test API access for Claude, OpenAI, Cursor, and Claude Code.
+// Standalone script that mirrors what the running app does to fetch usage data,
+// without going through the sandbox. Five tests, in display order:
+//
+//   1. Claude Code   — OAuth from ~/.claude/.credentials.json (Keychain fallback)
+//   2. Claude API    — Admin API key from app's Keychain
+//   3. OpenAI Codex  — OAuth from ~/.codex/auth.json
+//   4. OpenAI API    — Admin API key from app's Keychain
+//   5. Cursor        — Local SQLite + cookie auth
+//
 // Run with: swift scripts/APIAccessTest.swift
 //
 
@@ -11,122 +19,59 @@ import Foundation
 import Security
 import SQLite3
 
-// MARK: - Keychain Helpers
+// MARK: - Shared helpers
 
-func getKeychainItem(service: String, account: String? = nil) -> String? {
+func printHeader(_ title: String, emoji: String) {
+    print("\n" + String(repeating: "=", count: 60))
+    print("\(emoji) \(title)")
+    print(String(repeating: "=", count: 60))
+}
+
+func formatPercent(_ value: Double) -> String { String(format: "%.1f%%", value) }
+
+func formatDate(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.dateStyle = .short
+    formatter.timeStyle = .short
+    return formatter.string(from: date)
+}
+
+func realHomeDirectory() -> String {
+    if let pw = getpwuid(getuid()) {
+        return String(cString: pw.pointee.pw_dir)
+    }
+    return ProcessInfo.processInfo.environment["HOME"]
+        ?? FileManager.default.homeDirectoryForCurrentUser.path
+}
+
+/// Read a generic-password keychain item by service (and optional account).
+/// Used for the Claude Code system Keychain entry.
+func readKeychainData(service: String, account: String? = nil) -> Data? {
     var query: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
+        kSecClass as String:       kSecClassGenericPassword,
         kSecAttrService as String: service,
-        kSecReturnData as String: true,
-        kSecMatchLimit as String: kSecMatchLimitOne
+        kSecReturnData as String:  true,
+        kSecMatchLimit as String:  kSecMatchLimitOne
     ]
-
-    if let account = account {
-        query[kSecAttrAccount as String] = account
-    }
+    if let account = account { query[kSecAttrAccount as String] = account }
 
     var result: AnyObject?
     let status = SecItemCopyMatching(query as CFDictionary, &result)
+    guard status == errSecSuccess, let data = result as? Data else { return nil }
+    return data
+}
 
-    guard status == errSecSuccess,
-          let data = result as? Data,
-          let value = String(data: data, encoding: .utf8) else {
+/// Read an Admin API key stored by the MeterBar app under its keychain service.
+func readMeterBarAdminKey(account: String) -> String? {
+    guard let data = readKeychainData(service: "com.jmdeejay.meterbar", account: account) else {
         return nil
     }
-
-    return value
+    return String(data: data, encoding: .utf8)
 }
 
-func getKeychainItemForAppService(_ service: String) -> String? {
-    // Try with app-specific keychain (QuotaGuard's keychain service)
-    let appService = "com.agenticindiedev.quotaguard"
-    let query: [String: Any] = [
-        kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: appService,
-        kSecAttrAccount as String: service,
-        kSecReturnData as String: true,
-        kSecMatchLimit as String: kSecMatchLimitOne
-    ]
+// MARK: - 1. Claude Code (OAuth subscription)
 
-    var result: AnyObject?
-    let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-    guard status == errSecSuccess,
-          let data = result as? Data,
-          let value = String(data: data, encoding: .utf8) else {
-        return nil
-    }
-
-    return value
-}
-
-// MARK: - Response Models
-
-struct AnthropicUsageResponse: Codable {
-    let data: [AnthropicUsageBucket]
-    let hasMore: Bool?
-    let nextPage: String?
-
-    enum CodingKeys: String, CodingKey {
-        case data
-        case hasMore = "has_more"
-        case nextPage = "next_page"
-    }
-}
-
-struct AnthropicUsageBucket: Codable {
-    let inputTokens: Int?
-    let outputTokens: Int?
-    let model: String?
-
-    enum CodingKeys: String, CodingKey {
-        case inputTokens = "input_tokens"
-        case outputTokens = "output_tokens"
-        case model
-    }
-}
-
-struct OpenAIUsageResponse: Codable {
-    let object: String?
-    let data: [OpenAIUsageBucket]
-
-    enum CodingKeys: String, CodingKey {
-        case object
-        case data
-    }
-}
-
-struct OpenAIUsageBucket: Codable {
-    let results: [OpenAIUsageResult]
-}
-
-struct OpenAIUsageResult: Codable {
-    let inputTokens: Int?
-    let outputTokens: Int?
-    let model: String?
-
-    enum CodingKeys: String, CodingKey {
-        case inputTokens = "input_tokens"
-        case outputTokens = "output_tokens"
-        case model
-    }
-}
-
-struct ClaudeCodeCredentials: Codable {
-    let claudeAiOauth: ClaudeAiOAuth
-
-    enum CodingKeys: String, CodingKey {
-        case claudeAiOauth = "claudeAiOauth"
-    }
-}
-
-struct ClaudeAiOAuth: Codable {
-    let accessToken: String
-    let subscriptionType: String?
-    let rateLimitTier: String?
-}
-
-struct ClaudeCodeUsageResponse: Codable {
+struct ClaudeCodeUsageResponse: Decodable {
     let fiveHour: UsageWindow
     let sevenDay: UsageWindow
     let sevenDaySonnet: UsageWindow?
@@ -138,9 +83,9 @@ struct ClaudeCodeUsageResponse: Codable {
     }
 }
 
-struct UsageWindow: Codable {
+struct UsageWindow: Decodable {
     let utilization: Double
-    let resetsAt: Date
+    let resetsAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case utilization
@@ -148,486 +93,520 @@ struct UsageWindow: Codable {
     }
 }
 
-// MARK: - Test Functions
-
-func printHeader(_ title: String, emoji: String) {
-    print("\n" + String(repeating: "=", count: 60))
-    print("\(emoji) \(title)")
-    print(String(repeating: "=", count: 60))
+struct ClaudeCodeSnapshot {
+    let token: String
+    let subscriptionType: String?
+    let rateLimitTier: String?
+    let source: String
 }
 
-func formatTokens(_ count: Double) -> String {
-    if count >= 1_000_000 {
-        return String(format: "%.2fM", count / 1_000_000)
-    } else if count >= 1_000 {
-        return String(format: "%.1fK", count / 1_000)
-    } else {
-        return String(format: "%.0f", count)
+func parseClaudeCodeCredentials(_ data: Data, source: String) -> ClaudeCodeSnapshot? {
+    guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let oauth = object["claudeAiOauth"] as? [String: Any],
+          let token = oauth["accessToken"] as? String,
+          !token.isEmpty else { return nil }
+    return ClaudeCodeSnapshot(
+        token: token,
+        subscriptionType: oauth["subscriptionType"] as? String,
+        rateLimitTier: oauth["rateLimitTier"] as? String,
+        source: source
+    )
+}
+
+func resolveClaudeCodeSnapshot() -> ClaudeCodeSnapshot? {
+    let credentialsPath = "\(realHomeDirectory())/.claude/.credentials.json"
+    if let data = FileManager.default.contents(atPath: credentialsPath),
+       let snapshot = parseClaudeCodeCredentials(data, source: "~/.claude/.credentials.json") {
+        return snapshot
     }
+    if let data = readKeychainData(service: "Claude Code-credentials"),
+       let snapshot = parseClaudeCodeCredentials(data, source: "Keychain (Claude Code-credentials)") {
+        return snapshot
+    }
+    return nil
 }
 
-func formatDate(_ date: Date) -> String {
-    let formatter = DateFormatter()
-    formatter.dateStyle = .short
-    formatter.timeStyle = .short
-    return formatter.string(from: date)
-}
+func testClaudeCode() async -> (Bool, String) {
+    printHeader("CLAUDE CODE (OAuth subscription)", emoji: "🟣")
 
-// MARK: - Claude API Test
-
-func testClaudeAPI() async -> (success: Bool, message: String) {
-    printHeader("CLAUDE (Anthropic) API TEST", emoji: "🔵")
-
-    // Try to get the admin key from keychain
-    guard let adminKey = getKeychainItemForAppService("claude_admin_key") else {
-        print("⚠️  SKIPPED: No Claude Admin API key found in keychain")
-        print("   To configure: Open QuotaGuard app and add your Admin API key in Settings")
+    guard let snapshot = resolveClaudeCodeSnapshot() else {
+        print("⚠️  SKIPPED: No Claude Code OAuth token found")
+        print("   File checked: ~/.claude/.credentials.json")
+        print("   Keychain checked: Claude Code-credentials")
+        print("   To configure: run `claude` in Terminal to log in")
         return (false, "Not configured")
     }
 
-    print("✓ Claude Admin API key found")
+    print("✓ Source: \(snapshot.source)")
+    if let sub = snapshot.subscriptionType { print("  Subscription: \(sub)") }
+    if let tier = snapshot.rateLimitTier { print("  Rate-limit tier: \(tier)") }
 
-    // Build the request
+    guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
+        return (false, "Invalid URL")
+    }
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("Bearer \(snapshot.token)", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+    request.timeoutInterval = 30
+
+    do {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { return (false, "Invalid response") }
+
+        if http.statusCode == 401 {
+            print("❌ Authentication failed (401) — token expired; run `claude` to refresh")
+            return (false, "Authentication failed")
+        }
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? "Unknown"
+            print("❌ HTTP \(http.statusCode): \(body.prefix(120))")
+            return (false, "HTTP \(http.statusCode)")
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let usage = try decoder.decode(ClaudeCodeUsageResponse.self, from: data)
+
+        print("✅ SUCCESS: Claude Code OAuth usage endpoint reachable")
+        print("\nUsage:")
+        print("  Session (5h):     \(formatPercent(usage.fiveHour.utilization))" +
+              (usage.fiveHour.resetsAt.map { " — resets \(formatDate($0))" } ?? ""))
+        print("  All Models (7d):  \(formatPercent(usage.sevenDay.utilization))" +
+              (usage.sevenDay.resetsAt.map { " — resets \(formatDate($0))" } ?? ""))
+        if let sonnet = usage.sevenDaySonnet {
+            print("  Sonnet (7d):      \(formatPercent(sonnet.utilization))" +
+                  (sonnet.resetsAt.map { " — resets \(formatDate($0))" } ?? ""))
+        }
+        return (true, "\(formatPercent(usage.sevenDay.utilization)) weekly")
+    } catch {
+        print("❌ Request failed: \(error.localizedDescription)")
+        return (false, error.localizedDescription)
+    }
+}
+
+// MARK: - 2. Claude API (Admin)
+
+struct AnthropicUsageResponse: Decodable {
+    let data: [AnthropicUsageBucket]
+}
+
+struct AnthropicUsageBucket: Decodable {
+    let inputTokens: Int?
+    let outputTokens: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+    }
+}
+
+func testClaudeAPI() async -> (Bool, String) {
+    printHeader("CLAUDE API (Admin)", emoji: "🔵")
+
+    guard let adminKey = readMeterBarAdminKey(account: "claude_admin_key") else {
+        print("⚠️  SKIPPED: No Claude Admin API key in keychain")
+        print("   To configure: add it in MeterBar → Settings → Claude (Anthropic)")
+        return (false, "Not configured")
+    }
+    print("✓ Admin key found in keychain")
+
     let endDate = Date()
     let startDate = Calendar.current.date(byAdding: .day, value: -7, to: endDate)!
-
-    let dateFormatter = ISO8601DateFormatter()
-    dateFormatter.formatOptions = [.withInternetDateTime]
+    let iso = ISO8601DateFormatter()
+    iso.formatOptions = [.withInternetDateTime]
 
     var components = URLComponents(string: "https://api.anthropic.com/v1/organizations/usage_report/messages")!
     components.queryItems = [
-        URLQueryItem(name: "starting_at", value: dateFormatter.string(from: startDate)),
-        URLQueryItem(name: "ending_at", value: dateFormatter.string(from: endDate)),
+        URLQueryItem(name: "starting_at", value: iso.string(from: startDate)),
+        URLQueryItem(name: "ending_at", value: iso.string(from: endDate)),
         URLQueryItem(name: "bucket_width", value: "1d"),
         URLQueryItem(name: "group_by[]", value: "model")
     ]
-
-    guard let url = components.url else {
-        print("❌ Invalid URL")
-        return (false, "Invalid URL")
-    }
+    guard let url = components.url else { return (false, "Invalid URL") }
 
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
     request.setValue(adminKey, forHTTPHeaderField: "x-api-key")
     request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.timeoutInterval = 30.0
+    request.timeoutInterval = 30
 
     do {
         let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { return (false, "Invalid response") }
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            print("❌ Invalid response")
-            return (false, "Invalid response")
-        }
-
-        if httpResponse.statusCode == 401 {
-            print("❌ Authentication failed (401)")
-            print("   Your Admin API key may be invalid or expired")
+        if http.statusCode == 401 {
+            print("❌ Authentication failed (401) — Admin key invalid or expired")
             return (false, "Authentication failed")
         }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            let errorMsg = String(data: data, encoding: .utf8) ?? "Unknown"
-            print("❌ API Error (\(httpResponse.statusCode)): \(errorMsg.prefix(100))")
-            return (false, "HTTP \(httpResponse.statusCode)")
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? "Unknown"
+            print("❌ HTTP \(http.statusCode): \(body.prefix(120))")
+            return (false, "HTTP \(http.statusCode)")
         }
 
-        let decoder = JSONDecoder()
-        let responseData = try decoder.decode(AnthropicUsageResponse.self, from: data)
-
-        var totalTokens: Double = 0
-        for bucket in responseData.data {
-            totalTokens += Double(bucket.inputTokens ?? 0) + Double(bucket.outputTokens ?? 0)
-        }
-
-        print("✅ SUCCESS: Claude API access verified!")
-        print("\nUsage Data (Last 7 Days):")
-        print("  Total Tokens: \(formatTokens(totalTokens))")
-        print("  Data Buckets: \(responseData.data.count)")
-
-        return (true, "\(formatTokens(totalTokens)) tokens used")
-
+        let usage = try JSONDecoder().decode(AnthropicUsageResponse.self, from: data)
+        let totalTokens = usage.data.reduce(0) { $0 + ($1.inputTokens ?? 0) + ($1.outputTokens ?? 0) }
+        print("✅ SUCCESS: Claude Admin API reachable")
+        print("\nUsage (last 7 days):")
+        print("  Total tokens: \(totalTokens)")
+        print("  Buckets:      \(usage.data.count)")
+        return (true, "\(totalTokens) tokens")
     } catch {
         print("❌ Request failed: \(error.localizedDescription)")
         return (false, error.localizedDescription)
     }
 }
 
-// MARK: - OpenAI API Test
+// MARK: - 3. OpenAI Codex (OAuth subscription)
 
-func testOpenAIAPI() async -> (success: Bool, message: String) {
-    printHeader("OPENAI (Codex) API TEST", emoji: "🟢")
+struct CodexAuthFile: Decodable {
+    let tokens: CodexTokens?
+}
 
-    // Try to get the admin key from keychain
-    guard let adminKey = getKeychainItemForAppService("openai_admin_key") else {
-        print("⚠️  SKIPPED: No OpenAI Admin API key found in keychain")
-        print("   To configure: Open QuotaGuard app and add your Admin API key in Settings")
+struct CodexTokens: Decodable {
+    let accessToken: String?
+    let accountId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case accountId   = "account_id"
+    }
+}
+
+struct CodexCliUsageResponse: Decodable {
+    let planType: String
+    let rateLimit: CodexRateLimit?
+    let codeReviewRateLimit: CodexRateLimit?
+
+    enum CodingKeys: String, CodingKey {
+        case planType            = "plan_type"
+        case rateLimit           = "rate_limit"
+        case codeReviewRateLimit = "code_review_rate_limit"
+    }
+}
+
+struct CodexRateLimit: Decodable {
+    let primaryWindow: CodexLimitWindow
+    let secondaryWindow: CodexLimitWindow?
+
+    enum CodingKeys: String, CodingKey {
+        case primaryWindow   = "primary_window"
+        case secondaryWindow = "secondary_window"
+    }
+}
+
+struct CodexLimitWindow: Decodable {
+    let usedPercent: Double
+    let resetAt: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case usedPercent = "used_percent"
+        case resetAt     = "reset_at"
+    }
+}
+
+func testCodexCli() async -> (Bool, String) {
+    printHeader("OPENAI CODEX (OAuth subscription)", emoji: "🟢")
+
+    let authPath = "\(realHomeDirectory())/.codex/auth.json"
+    guard let data = FileManager.default.contents(atPath: authPath),
+          let auth = try? JSONDecoder().decode(CodexAuthFile.self, from: data),
+          let token = auth.tokens?.accessToken, !token.isEmpty else {
+        print("⚠️  SKIPPED: No Codex CLI OAuth token at \(authPath)")
+        print("   To configure: run `codex login` in Terminal")
         return (false, "Not configured")
     }
+    print("✓ Source: ~/.codex/auth.json")
+    if let accountId = auth.tokens?.accountId {
+        print("  Account ID: \(accountId)")
+    } else {
+        print("  No account_id — request will return free-plan data")
+    }
 
-    print("✓ OpenAI Admin API key found")
+    guard let url = URL(string: "https://chatgpt.com/backend-api/wham/usage") else {
+        return (false, "Invalid URL")
+    }
 
-    // Build the request
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    if let accountId = auth.tokens?.accountId {
+        request.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
+    }
+    request.setValue("https://chatgpt.com/", forHTTPHeaderField: "Referer")
+    request.setValue("https://chatgpt.com", forHTTPHeaderField: "Origin")
+    request.setValue("*/*", forHTTPHeaderField: "Accept")
+    request.setValue(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+        forHTTPHeaderField: "User-Agent"
+    )
+    request.timeoutInterval = 30
+
+    do {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { return (false, "Invalid response") }
+
+        if http.statusCode == 401 {
+            print("❌ Authentication failed (401) — token expired; run `codex login` again")
+            return (false, "Authentication failed")
+        }
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? "Unknown"
+            print("❌ HTTP \(http.statusCode): \(body.prefix(120))")
+            return (false, "HTTP \(http.statusCode)")
+        }
+
+        let usage = try JSONDecoder().decode(CodexCliUsageResponse.self, from: data)
+        print("✅ SUCCESS: Codex CLI usage endpoint reachable")
+        print("\nPlan: \(usage.planType)")
+        if let rate = usage.rateLimit {
+            let p = rate.primaryWindow
+            print("  Session (5h):  \(formatPercent(p.usedPercent)) — resets \(formatDate(Date(timeIntervalSince1970: TimeInterval(p.resetAt))))")
+            if let s = rate.secondaryWindow {
+                print("  Weekly (7d):   \(formatPercent(s.usedPercent)) — resets \(formatDate(Date(timeIntervalSince1970: TimeInterval(s.resetAt))))")
+            } else {
+                print("  Weekly (7d):   \(formatPercent(0.0))")
+            }
+        } else {
+            print("  No rate_limit (free plan or zero usage)")
+        }
+        if let cr = usage.codeReviewRateLimit?.primaryWindow {
+            print("  Code Review:   \(formatPercent(cr.usedPercent)) — resets \(formatDate(Date(timeIntervalSince1970: TimeInterval(cr.resetAt))))")
+        }
+        let weekly = usage.rateLimit?.secondaryWindow?.usedPercent ?? 0
+        return (true, "\(usage.planType), \(formatPercent(weekly)) weekly")
+    } catch {
+        print("❌ Request failed: \(error.localizedDescription)")
+        return (false, error.localizedDescription)
+    }
+}
+
+// MARK: - 4. OpenAI API (Admin)
+
+struct OpenAIUsageResponse: Decodable {
+    let data: [OpenAIUsageBucket]
+}
+
+struct OpenAIUsageBucket: Decodable {
+    let results: [OpenAIUsageResult]
+}
+
+struct OpenAIUsageResult: Decodable {
+    let inputTokens: Int?
+    let outputTokens: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+    }
+}
+
+func testOpenAIAPI() async -> (Bool, String) {
+    printHeader("OPENAI API (Admin)", emoji: "🟢")
+
+    guard let adminKey = readMeterBarAdminKey(account: "openai_admin_key") else {
+        print("⚠️  SKIPPED: No OpenAI Admin API key in keychain")
+        print("   To configure: add it in MeterBar → Settings → OpenAI")
+        return (false, "Not configured")
+    }
+    print("✓ Admin key found in keychain")
+
     let endDate = Date()
     let startDate = Calendar.current.date(byAdding: .day, value: -7, to: endDate)!
 
-    let startTime = Int(startDate.timeIntervalSince1970)
-    let endTime = Int(endDate.timeIntervalSince1970)
-
     var components = URLComponents(string: "https://api.openai.com/v1/organization/usage/completions")!
     components.queryItems = [
-        URLQueryItem(name: "start_time", value: String(startTime)),
-        URLQueryItem(name: "end_time", value: String(endTime)),
+        URLQueryItem(name: "start_time", value: String(Int(startDate.timeIntervalSince1970))),
+        URLQueryItem(name: "end_time",   value: String(Int(endDate.timeIntervalSince1970))),
         URLQueryItem(name: "bucket_width", value: "1d"),
         URLQueryItem(name: "group_by", value: "model")
     ]
-
-    guard let url = components.url else {
-        print("❌ Invalid URL")
-        return (false, "Invalid URL")
-    }
+    guard let url = components.url else { return (false, "Invalid URL") }
 
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
     request.setValue("Bearer \(adminKey)", forHTTPHeaderField: "Authorization")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.timeoutInterval = 30.0
+    request.timeoutInterval = 30
 
     do {
         let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { return (false, "Invalid response") }
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            print("❌ Invalid response")
-            return (false, "Invalid response")
-        }
-
-        if httpResponse.statusCode == 401 {
-            print("❌ Authentication failed (401)")
-            print("   Your Admin API key may be invalid or expired")
+        if http.statusCode == 401 {
+            print("❌ Authentication failed (401) — Admin key invalid or expired")
             return (false, "Authentication failed")
         }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            let errorMsg = String(data: data, encoding: .utf8) ?? "Unknown"
-            print("❌ API Error (\(httpResponse.statusCode)): \(errorMsg.prefix(100))")
-            return (false, "HTTP \(httpResponse.statusCode)")
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? "Unknown"
+            print("❌ HTTP \(http.statusCode): \(body.prefix(120))")
+            return (false, "HTTP \(http.statusCode)")
         }
 
-        let decoder = JSONDecoder()
-        let responseData = try decoder.decode(OpenAIUsageResponse.self, from: data)
-
-        var totalTokens: Double = 0
-        for bucket in responseData.data {
-            for result in bucket.results {
-                totalTokens += Double(result.inputTokens ?? 0) + Double(result.outputTokens ?? 0)
-            }
-        }
-
-        print("✅ SUCCESS: OpenAI API access verified!")
-        print("\nUsage Data (Last 7 Days):")
-        print("  Total Tokens: \(formatTokens(totalTokens))")
-        print("  Data Buckets: \(responseData.data.count)")
-
-        return (true, "\(formatTokens(totalTokens)) tokens used")
-
+        let usage = try JSONDecoder().decode(OpenAIUsageResponse.self, from: data)
+        let totalTokens = usage.data
+            .flatMap { $0.results }
+            .reduce(0) { $0 + ($1.inputTokens ?? 0) + ($1.outputTokens ?? 0) }
+        print("✅ SUCCESS: OpenAI Admin API reachable")
+        print("\nUsage (last 7 days):")
+        print("  Total tokens: \(totalTokens)")
+        print("  Buckets:      \(usage.data.count)")
+        return (true, "\(totalTokens) tokens")
     } catch {
         print("❌ Request failed: \(error.localizedDescription)")
         return (false, error.localizedDescription)
     }
 }
 
-// MARK: - Claude Code API Test
+// MARK: - 5. Cursor
 
-func testClaudeCodeAPI() async -> (success: Bool, message: String) {
-    printHeader("CLAUDE CODE (OAuth) API TEST", emoji: "🟣")
-
-    // Try to get the OAuth token from Claude Code's keychain
-    guard let credentialsJson = getKeychainItem(service: "Claude Code-credentials") else {
-        print("⚠️  SKIPPED: No Claude Code OAuth token found")
-        print("   To configure: Run 'claude login' in your terminal")
-        return (false, "Not configured")
-    }
-
-    guard let credData = credentialsJson.data(using: .utf8),
-          let credentials = try? JSONDecoder().decode(ClaudeCodeCredentials.self, from: credData) else {
-        print("❌ Failed to parse Claude Code credentials")
-        return (false, "Invalid credentials format")
-    }
-
-    let token = credentials.claudeAiOauth.accessToken
-    print("✓ Claude Code OAuth token found")
-
-    if let subType = credentials.claudeAiOauth.subscriptionType {
-        print("  Subscription: \(subType)")
-    }
-    if let tier = credentials.claudeAiOauth.rateLimitTier {
-        print("  Rate Limit Tier: \(tier)")
-    }
-
-    // Try multiple endpoint patterns
-    let endpoints = [
-        "https://api.anthropic.com/v1/oauth/usage",
-        "https://api.anthropic.com/api/v1/oauth/usage",
-        "https://api.anthropic.com/api/oauth/usage",
-        "https://api.anthropic.com/oauth/v1/usage"
-    ]
-
-    for endpoint in endpoints {
-        guard let url = URL(string: endpoint) else { continue }
-
-        print("\nTrying endpoint: \(endpoint)")
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        request.timeoutInterval = 30.0
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse else { continue }
-
-            print("  Status: \(httpResponse.statusCode)")
-
-            if httpResponse.statusCode == 401 {
-                print("❌ Authentication failed (401)")
-                return (false, "Token expired or invalid")
-            }
-
-            if (200...299).contains(httpResponse.statusCode) {
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .iso8601
-
-                if let usageResponse = try? decoder.decode(ClaudeCodeUsageResponse.self, from: data) {
-                    print("✅ SUCCESS: Claude Code API access verified!")
-                    print("\nUsage Data:")
-                    print("  5-Hour Session: \(String(format: "%.1f", usageResponse.fiveHour.utilization))%")
-                    print("    Resets: \(formatDate(usageResponse.fiveHour.resetsAt))")
-                    print("  7-Day Weekly: \(String(format: "%.1f", usageResponse.sevenDay.utilization))%")
-                    print("    Resets: \(formatDate(usageResponse.sevenDay.resetsAt))")
-
-                    if let sonnet = usageResponse.sevenDaySonnet {
-                        print("  7-Day Sonnet: \(String(format: "%.1f", sonnet.utilization))%")
-                    }
-
-                    return (true, "\(String(format: "%.1f", usageResponse.sevenDay.utilization))% weekly usage")
-                }
-
-                // If we got 200 but couldn't parse, show the response
-                let rawResponse = String(data: data, encoding: .utf8) ?? "Unable to decode"
-                print("  Response (200 but unexpected format): \(rawResponse.prefix(200))")
-            }
-        } catch {
-            print("  Error: \(error.localizedDescription)")
-        }
-    }
-
-    print("❌ All endpoint attempts failed")
-    print("   Note: The OAuth usage endpoint may not be publicly available yet")
-    return (false, "API endpoint not accessible")
+struct CursorUsageSummaryResponse: Decodable {
+    let billingCycleEnd: String?
+    let membershipType: String?
+    let individualUsage: CursorIndividualUsage?
 }
 
-// MARK: - Cursor API Test (cursor-stats approach)
-
-/// Get the path to Cursor's state database
-func getCursorDatabasePath() -> String? {
-    let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-    let dbPath = "\(homeDir)/Library/Application Support/Cursor/User/globalStorage/state.vscdb"
-
-    if FileManager.default.fileExists(atPath: dbPath) {
-        return dbPath
-    }
-
-    // Try alternative paths
-    let alternatePaths = [
-        "\(homeDir)/Library/Application Support/Cursor/state.vscdb",
-        "\(homeDir)/.config/Cursor/User/globalStorage/state.vscdb"
-    ]
-
-    for path in alternatePaths {
-        if FileManager.default.fileExists(atPath: path) {
-            return path
-        }
-    }
-
-    return nil
+struct CursorIndividualUsage: Decodable {
+    let plan: CursorPlanUsage?
+    let onDemand: CursorOnDemandUsage?
 }
 
-/// Extract userId from JWT token's 'sub' claim
+struct CursorPlanUsage: Decodable {
+    let totalPercentUsed: Double?
+    let autoPercentUsed: Double?
+    let apiPercentUsed: Double?
+}
+
+struct CursorOnDemandUsage: Decodable {
+    let used: Int?
+    let limit: Int?
+    let enabled: Bool?
+}
+
+func cursorDatabasePath() -> String? {
+    let home = realHomeDirectory()
+    let candidates = [
+        "\(home)/Library/Application Support/Cursor/User/globalStorage/state.vscdb",
+        "\(home)/Library/Application Support/Cursor/state.vscdb",
+        "\(home)/.config/Cursor/User/globalStorage/state.vscdb"
+    ]
+    return candidates.first { FileManager.default.fileExists(atPath: $0) }
+}
+
 func extractUserIdFromJWT(_ token: String) -> String? {
     let parts = token.split(separator: ".")
     guard parts.count >= 2 else { return nil }
-
     var payload = String(parts[1])
     let remainder = payload.count % 4
-    if remainder > 0 {
-        payload += String(repeating: "=", count: 4 - remainder)
-    }
-
+    if remainder > 0 { payload += String(repeating: "=", count: 4 - remainder) }
     payload = payload
         .replacingOccurrences(of: "-", with: "+")
         .replacingOccurrences(of: "_", with: "/")
-
     guard let data = Data(base64Encoded: payload),
           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let sub = json["sub"] as? String else {
-        return nil
-    }
-
-    if sub.contains("|") {
-        return sub.components(separatedBy: "|").last
-    }
-    return sub
+          let sub = json["sub"] as? String else { return nil }
+    return sub.contains("|") ? sub.components(separatedBy: "|").last : sub
 }
 
-/// Read access token from Cursor's SQLite database
-func getCursorTokenFromDatabase() -> (userId: String, token: String)? {
-    guard let dbPath = getCursorDatabasePath() else {
-        print("  Database not found at expected paths")
+func cursorTokenFromDatabase() -> (userId: String, token: String)? {
+    guard let dbPath = cursorDatabasePath() else {
+        print("  Database not found at any known path")
         return nil
     }
-
-    print("  Database found: \(dbPath)")
+    print("  Database: \(dbPath)")
 
     var db: OpaquePointer?
     guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-        print("  Failed to open database: \(String(cString: sqlite3_errmsg(db)))")
+        print("  Failed to open database")
         sqlite3_close(db)
         return nil
     }
     defer { sqlite3_close(db) }
 
-    let query = "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'"
     var statement: OpaquePointer?
-
+    let query = "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'"
     guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
-        print("  Failed to prepare query: \(String(cString: sqlite3_errmsg(db)))")
         return nil
     }
     defer { sqlite3_finalize(statement) }
-
-    guard sqlite3_step(statement) == SQLITE_ROW else {
-        print("  No token found in database (user may not be logged in)")
+    guard sqlite3_step(statement) == SQLITE_ROW,
+          let cString = sqlite3_column_text(statement, 0) else {
+        print("  No token row in ItemTable (not logged in?)")
         return nil
     }
-
-    guard let tokenCString = sqlite3_column_text(statement, 0) else {
-        print("  Failed to read token value")
-        return nil
-    }
-
-    let token = String(cString: tokenCString)
-
+    let token = String(cString: cString)
     guard let userId = extractUserIdFromJWT(token) else {
-        print("  Failed to extract userId from JWT")
+        print("  Could not extract userId from JWT")
         return nil
     }
-
-    return (userId: userId, token: token)
+    return (userId, token)
 }
 
-func testCursorAPI() async -> (success: Bool, message: String) {
-    printHeader("CURSOR API TEST", emoji: "🟡")
+func testCursor() async -> (Bool, String) {
+    printHeader("CURSOR", emoji: "🟡")
 
-    // Get token from Cursor's SQLite database
-    guard let (userId, token) = getCursorTokenFromDatabase() else {
-        print("⚠️  SKIPPED: No Cursor token found in database")
-        print("   To configure: Open Cursor and log in to your account")
+    guard let (userId, token) = cursorTokenFromDatabase() else {
+        print("⚠️  SKIPPED: No Cursor token found")
+        print("   To configure: open Cursor and sign in")
         return (false, "Not configured")
     }
+    print("✓ Token found (user \(userId.prefix(8))...)")
 
-    print("✓ Cursor token found in database")
-    print("  User ID: \(userId.prefix(8))...")
-
-    // Format authentication cookie
-    let authCookie = "\(userId)%3A%3A\(token)"
-
-    // Call Cursor usage API
-    let usageEndpoint = "https://cursor.com/api/usage"
-
-    guard let url = URL(string: usageEndpoint) else {
+    guard let url = URL(string: "https://cursor.com/api/usage-summary") else {
         return (false, "Invalid URL")
     }
 
-    print("\nCalling: \(usageEndpoint)")
-
+    let authCookie = "\(userId)%3A%3A\(token)"
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.setValue("WorkosCursorSessionToken=\(authCookie)", forHTTPHeaderField: "Cookie")
-    request.timeoutInterval = 30.0
+    request.setValue("https://cursor.com", forHTTPHeaderField: "Origin")
+    request.setValue("https://cursor.com/dashboard?tab=usage", forHTTPHeaderField: "Referer")
+    request.setValue(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        forHTTPHeaderField: "User-Agent"
+    )
+    request.timeoutInterval = 30
 
     do {
         let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { return (false, "Invalid response") }
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            print("❌ Invalid response type")
-            return (false, "Invalid response")
-        }
-
-        print("  Status: \(httpResponse.statusCode)")
-
-        if httpResponse.statusCode == 401 {
-            print("❌ Authentication failed (401)")
-            print("   Token may be expired - try logging out and back into Cursor")
+        if http.statusCode == 401 {
+            print("❌ Authentication failed (401) — sign out and back in to Cursor")
             return (false, "Authentication failed")
         }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            let errorMsg = String(data: data, encoding: .utf8) ?? "Unknown"
-            print("❌ API Error: \(errorMsg.prefix(100))")
-            return (false, "HTTP \(httpResponse.statusCode)")
+        guard (200...299).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? "Unknown"
+            print("❌ HTTP \(http.statusCode): \(body.prefix(120))")
+            return (false, "HTTP \(http.statusCode)")
         }
 
-        print("✅ SUCCESS: Cursor API access verified!")
+        let usage = try JSONDecoder().decode(CursorUsageSummaryResponse.self, from: data)
+        print("✅ SUCCESS: Cursor usage-summary endpoint reachable")
+        print("\nPlan: \(usage.membershipType ?? "unknown")")
+        if let end = usage.billingCycleEnd { print("Billing cycle ends: \(end)") }
 
-        // Parse the response
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            print("  (Could not parse response)")
-            return (true, "API accessible")
+        let plan = usage.individualUsage?.plan
+        let total = plan?.totalPercentUsed ?? 0
+        let api   = plan?.apiPercentUsed ?? 0
+        let auto  = plan?.autoPercentUsed ?? 0
+        print("  API:     \(formatPercent(api))")
+        print("  Monthly: \(formatPercent(total)) (auto \(formatPercent(auto)))")
+
+        if let onDemand = usage.individualUsage?.onDemand, onDemand.enabled == true {
+            let used = onDemand.used ?? 0
+            let cap  = onDemand.limit ?? 0
+            print("  On-Demand: \(used)\(cap > 0 ? " / \(cap)" : "")")
         }
-
-        // Extract startOfMonth
-        if let startOfMonth = json["startOfMonth"] as? String {
-            print("\nBilling Period Start: \(startOfMonth)")
-        }
-
-        // Extract model usage
-        var totalRequests = 0
-        var totalTokens = 0
-
-        print("\nUsage by Model:")
-        for (key, value) in json {
-            if key == "startOfMonth" { continue }
-
-            if let modelData = value as? [String: Any] {
-                let numRequests = modelData["numRequests"] as? Int ?? 0
-                let numTokens = modelData["numTokens"] as? Int ?? 0
-                let maxRequests = modelData["maxRequestUsage"] as? Int
-
-                totalRequests += numRequests
-                totalTokens += numTokens
-
-                if numRequests > 0 || numTokens > 0 {
-                    print("  \(key):")
-                    print("    Requests: \(numRequests)" + (maxRequests != nil ? " / \(maxRequests!)" : ""))
-                    print("    Tokens: \(formatTokens(Double(numTokens)))")
-                }
-            }
-        }
-
-        print("\nTotal Usage:")
-        print("  Requests: \(totalRequests)")
-        print("  Tokens: \(formatTokens(Double(totalTokens)))")
-
-        return (true, "\(totalRequests) requests used")
-
+        return (true, "\(usage.membershipType ?? "unknown") plan, \(formatPercent(total)) monthly")
     } catch {
         print("❌ Request failed: \(error.localizedDescription)")
         return (false, error.localizedDescription)
@@ -641,49 +620,50 @@ func printSummary(_ results: [(String, Bool, String)]) {
     print("📊 SUMMARY")
     print(String(repeating: "=", count: 60))
     print("")
-    print("  Service       | Status         | Details")
+    print("  Service        | Status         | Details")
     print("  " + String(repeating: "-", count: 55))
-
     for (service, success, message) in results {
-        let paddedService = service.padding(toLength: 12, withPad: " ", startingAt: 0)
-        let status = success ? "✅ Connected" : (message == "Not configured" ? "⚪ Skip" : "❌ Failed")
+        let paddedService = service.padding(toLength: 13, withPad: " ", startingAt: 0)
+        let status: String
+        if success { status = "✅ Connected" }
+        else if message == "Not configured" { status = "⚪ Skip" }
+        else { status = "❌ Failed" }
         let paddedStatus = status.padding(toLength: 14, withPad: " ", startingAt: 0)
         print("  \(paddedService) | \(paddedStatus) | \(message)")
     }
     print("")
 }
 
-// Run all tests
 print("")
 print("╔══════════════════════════════════════════════════════════╗")
-print("║          QuotaGuard API Access Test Suite                ║")
+print("║              MeterBar API Access Test Suite              ║")
 print("╚══════════════════════════════════════════════════════════╝")
 
-var results: [(String, Bool, String)] = []
-
-// Run tests sequentially
 Task {
-    let claudeResult = await testClaudeAPI()
-    results.append(("Claude", claudeResult.success, claudeResult.message))
+    var results: [(String, Bool, String)] = []
 
-    let openaiResult = await testOpenAIAPI()
-    results.append(("OpenAI", openaiResult.success, openaiResult.message))
+    let cc = await testClaudeCode()
+    results.append(("Claude Code", cc.0, cc.1))
 
-    let claudeCodeResult = await testClaudeCodeAPI()
-    results.append(("Claude Code", claudeCodeResult.success, claudeCodeResult.message))
+    let claude = await testClaudeAPI()
+    results.append(("Claude API", claude.0, claude.1))
 
-    let cursorResult = await testCursorAPI()
-    results.append(("Cursor", cursorResult.success, cursorResult.message))
+    let codex = await testCodexCli()
+    results.append(("OpenAI Codex", codex.0, codex.1))
+
+    let openai = await testOpenAIAPI()
+    results.append(("OpenAI API", openai.0, openai.1))
+
+    let cursor = await testCursor()
+    results.append(("Cursor", cursor.0, cursor.1))
 
     printSummary(results)
 
     print("╔══════════════════════════════════════════════════════════╗")
-    print("║                    Tests Complete                        ║")
+    print("║                      Tests Complete                      ║")
     print("╚══════════════════════════════════════════════════════════╝")
     print("")
-
     exit(0)
 }
 
-// Keep the script running until async tasks complete
 RunLoop.main.run()
