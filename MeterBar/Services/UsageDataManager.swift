@@ -28,7 +28,10 @@ class UsageDataManager: ObservableObject {
     private let authManager = AuthenticationManager.shared
 
     private var refreshTimer: Timer?
-    private let cacheKey = "cached_usage_metrics"
+    // v2: UsageMetrics shape changed from `sessionLimit/weeklyLimit/codeReviewLimit`
+    // triplets to an ordered `[UsageLimit]` array (each carrying its own label).
+    // Bumping the key invalidates v1 caches instead of failing to decode them.
+    private let cacheKey = "cached_usage_metrics_v2"
     private let sharedStore = SharedDataStore.shared
 
     private init() {
@@ -287,15 +290,9 @@ class UsageDataManager: ObservableObject {
 
     func getNextRefreshTime() -> Date? {
         // Find the earliest reset time across all metrics
-        let resetTimes = metrics.values.compactMap { metrics -> Date? in
-            let times = [
-                metrics.sessionLimit?.resetTime,
-                metrics.weeklyLimit?.resetTime,
-                metrics.codeReviewLimit?.resetTime
-            ].compactMap { $0 }
-            return times.min()
+        let resetTimes = metrics.values.compactMap { metric -> Date? in
+            metric.limits.compactMap { $0.resetTime }.min()
         }
-
         return resetTimes.min()
     }
 }

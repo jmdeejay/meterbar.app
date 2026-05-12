@@ -244,36 +244,34 @@ class ClaudeCodeLocalService: ObservableObject {
                 self.lastError = nil
             }
 
-            // Session limit = 5-hour window
             let sessionLimit = UsageLimit(
+                compactLabel: "S",
+                verboseLabel: "Session (5h)",
                 used: usageResponse.fiveHour.utilization,
                 total: 100.0,
                 resetTime: usageResponse.fiveHour.resetsAt
             )
 
-            // Weekly limit = 7-day window (all models)
             let weeklyLimit = UsageLimit(
+                compactLabel: "W",
+                verboseLabel: "All Models (7d)",
                 used: usageResponse.sevenDay.utilization,
                 total: 100.0,
                 resetTime: usageResponse.sevenDay.resetsAt
             )
 
-            // Sonnet-only weekly limit (if available)
-            var sonnetLimit: UsageLimit? = nil
+            var limits: [UsageLimit] = [sessionLimit, weeklyLimit]
             if let sonnet = usageResponse.sevenDaySonnet {
-                sonnetLimit = UsageLimit(
+                limits.append(UsageLimit(
+                    compactLabel: "Sn",
+                    verboseLabel: "Sonnet (7d)",
                     used: sonnet.utilization,
                     total: 100.0,
                     resetTime: sonnet.resetsAt
-                )
+                ))
             }
 
-            return UsageMetrics(
-                service: .claudeCode,
-                sessionLimit: sessionLimit,
-                weeklyLimit: weeklyLimit,
-                codeReviewLimit: sonnetLimit
-            )
+            return UsageMetrics(service: .claudeCode, limits: limits)
         } catch let urlError as URLError {
             let errorMessage: String
             switch urlError.code {

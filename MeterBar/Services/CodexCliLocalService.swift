@@ -208,55 +208,42 @@ class CodexCliLocalService: ObservableObject {
                 self.subscriptionType = usageResponse.planType
             }
 
-            // Check if rate limits exist (free accounts have null rate_limit)
+            // Free accounts have null rate_limit
             guard let rateLimit = usageResponse.rateLimit else {
                 print("[CodexCliLocalService] No rate limit data (free account or no usage yet)")
-                // Return empty metrics for free accounts
-                return UsageMetrics(
-                    service: .codexCli,
-                    sessionLimit: nil,
-                    weeklyLimit: nil,
-                    codeReviewLimit: nil
-                )
+                return UsageMetrics(service: .codexCli, limits: [])
             }
 
-            // Map the response to UsageMetrics
-            // Primary window (5 hours = 18000 seconds) = session limit
             let primaryWindow = rateLimit.primaryWindow
-            print("[CodexCliLocalService] Primary window: usedPercent=\(primaryWindow.usedPercent), resetAt=\(primaryWindow.resetAt)")
             let sessionLimit = UsageLimit(
+                compactLabel: "S",
+                verboseLabel: "Session (5h)",
                 used: primaryWindow.usedPercent,
                 total: 100.0,
                 resetTime: Date(timeIntervalSince1970: Double(primaryWindow.resetAt))
             )
 
-            // Secondary window (7 days = 604800 seconds) = weekly limit
             let secondaryWindow = rateLimit.secondaryWindow
-            print("[CodexCliLocalService] Secondary window: usedPercent=\(secondaryWindow?.usedPercent ?? -1), resetAt=\(secondaryWindow?.resetAt ?? 0)")
             let weeklyLimit = UsageLimit(
+                compactLabel: "W",
+                verboseLabel: "Weekly",
                 used: secondaryWindow?.usedPercent ?? 0.0,
                 total: 100.0,
-                resetTime: secondaryWindow != nil ? Date(timeIntervalSince1970: Double(secondaryWindow!.resetAt)) : Date()
+                resetTime: secondaryWindow.map { Date(timeIntervalSince1970: Double($0.resetAt)) } ?? Date()
             )
 
-            // Code review rate limit (7 days window) = code review limit
-            var codeReviewLimit: UsageLimit? = nil
+            var limits: [UsageLimit] = [sessionLimit, weeklyLimit]
             if let codeReviewPrimary = usageResponse.codeReviewRateLimit?.primaryWindow {
-                print("[CodexCliLocalService] Code review: usedPercent=\(codeReviewPrimary.usedPercent), resetAt=\(codeReviewPrimary.resetAt)")
-                codeReviewLimit = UsageLimit(
+                limits.append(UsageLimit(
+                    compactLabel: "CR",
+                    verboseLabel: "Code Review",
                     used: codeReviewPrimary.usedPercent,
                     total: 100.0,
                     resetTime: Date(timeIntervalSince1970: Double(codeReviewPrimary.resetAt))
-                )
+                ))
             }
 
-            print("[CodexCliLocalService] Final metrics: session=\(sessionLimit.percentage)%, weekly=\(weeklyLimit.percentage)%, codeReview=\(codeReviewLimit?.percentage ?? -1)%")
-            return UsageMetrics(
-                service: .codexCli,
-                sessionLimit: sessionLimit,
-                weeklyLimit: weeklyLimit,
-                codeReviewLimit: codeReviewLimit
-            )
+            return UsageMetrics(service: .codexCli, limits: limits)
         } catch let urlError as URLError {
             let errorMessage: String
             switch urlError.code {

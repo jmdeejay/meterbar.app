@@ -181,13 +181,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func checkAndNotify(metrics: UsageMetrics) {
-        let entries: [(name: String, limit: UsageLimit)] = [
-            ("session", metrics.sessionLimit),
-            ("weekly", metrics.weeklyLimit),
-            ("codeReview", metrics.codeReviewLimit)
-        ].compactMap { name, limit in limit.map { (name, $0) } }
-
-        for (name, limit) in entries {
+        for limit in metrics.limits {
+            // Keep the dedupe key stable across reorderings by using the
+            // service-supplied compact label as the identifier.
+            let name = limit.compactLabel
             let tier: NotificationDeduper.Tier?
             if limit.percentage >= 100 {
                 tier = .reached

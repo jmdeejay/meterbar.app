@@ -2,7 +2,10 @@ import AppKit
 import Foundation
 import SwiftUI
 
-struct UsageLimit: Equatable {
+struct UsageLimit: Equatable, Identifiable {
+    let id = UUID()
+    let compactLabel: String
+    let verboseLabel: String
     let used: Double
     let total: Double
     let resetTime: Date?
@@ -46,34 +49,79 @@ enum UsageStatus {
 
 enum ServiceType: String, CaseIterable, Identifiable {
     case claudeCode = "Claude Code"
-    case openai = "OpenAI"
+    case codexCli = "Codex CLI"
     case cursor = "Cursor"
 
     var id: String { rawValue }
 
-    var displayName: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .claudeCode: return "Claude Code"
+        case .codexCli:   return "OpenAI Codex"
+        case .cursor:     return "Cursor"
+        }
+    }
 
-    var iconName: String {
+    var iconSymbolName: String {
         switch self {
         case .claudeCode: return "terminal"
-        case .openai: return "brain"
-        case .cursor: return "cursorarrow.click"
+        case .codexCli:   return "terminal.fill"
+        case .cursor:     return "cursorarrow.click"
         }
+    }
+
+    var brandColor: Color {
+        switch self {
+        case .claudeCode: return Color(red: 224/255, green: 128/255, blue: 0/255)   // #E08000
+        case .codexCli:   return Color(red: 144/255, green: 112/255, blue: 240/255) // #9070F0
+        case .cursor:     return Color(red:  16/255, green: 192/255, blue: 224/255) // #10C0E0
+        }
+    }
+}
+
+enum BrandIcon {
+    private static let assetsRoot: URL = {
+        let scriptURL = URL(fileURLWithPath: #filePath)
+        return scriptURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("MeterBarWidget/Assets.xcassets")
+    }()
+
+    static func image(for service: ServiceType, size: CGFloat) -> AnyView {
+        let (folder, file): (String, String)
+        switch service {
+        case .claudeCode: (folder, file) = ("ClaudeIcon.imageset", "claude@2x.png")
+        case .codexCli:   (folder, file) = ("CodexIcon.imageset",  "codex@2x.png")
+        case .cursor:     (folder, file) = ("CursorIcon.imageset", "cursor@2x.png")
+        }
+        let path = assetsRoot.appendingPathComponent(folder).appendingPathComponent(file).path
+        if let nsImage = NSImage(contentsOfFile: path) {
+            return AnyView(
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: size, height: size)
+            )
+        }
+        return AnyView(
+            Image(systemName: "questionmark.square")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+                .foregroundColor(.secondary)
+        )
     }
 }
 
 struct UsageMetrics: Identifiable {
     let id = UUID()
     let service: ServiceType
-    let sessionLimit: UsageLimit?
-    let weeklyLimit: UsageLimit?
-    let codeReviewLimit: UsageLimit?
+    let limits: [UsageLimit]
     let lastUpdated: Date
 
     var overallStatus: UsageStatus {
-        let limits = [sessionLimit, weeklyLimit, codeReviewLimit].compactMap { $0 }
         guard !limits.isEmpty else { return .good }
-
         if limits.contains(where: { $0.isAtLimit }) {
             return .critical
         } else if limits.contains(where: { $0.isNearLimit }) {
@@ -177,7 +225,7 @@ struct MacOSWidgetBackground: View {
 
 struct MenuBarSnapshotView: View {
     let claudeCodeMetrics: UsageMetrics
-    let openAIMetrics: UsageMetrics
+    let codexMetrics: UsageMetrics
     let cursorMetrics: UsageMetrics
 
     var body: some View {
@@ -189,77 +237,67 @@ struct MenuBarSnapshotView: View {
                 ScrollView {
                     VStack(spacing: 12) {
                         ClaudeCodeSnapshotRow(metrics: claudeCodeMetrics, subscriptionLabel: "Max")
-                        ServiceSnapshotRow(metrics: openAIMetrics)
+                        ServiceSnapshotRow(metrics: codexMetrics, subscriptionLabel: "Plus")
                         CursorSnapshotRow(metrics: cursorMetrics, subscriptionLabel: "Pro")
                     }
                     .padding()
                 }
                 .scrollIndicators(.hidden)
-                Divider()
-                footer
             }
         }
         .frame(width: 320, height: 500)
     }
 
     private var header: some View {
-        HStack {
-            Text("Quota Guard")
+        HStack(spacing: 12) {
+            Image(systemName: "gearshape")
+                .foregroundColor(.primary)
+            Text("MeterBar")
                 .font(.headline)
             Spacer()
             Image(systemName: "arrow.clockwise")
-                .foregroundColor(.secondary)
+                .foregroundColor(.primary)
         }
         .padding()
         .background(VisualEffectView(material: .headerView))
-    }
-
-    private var footer: some View {
-        HStack {
-            Button("Quit") {}
-                .buttonStyle(.bordered)
-                .foregroundColor(.red)
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(VisualEffectView(material: .menu))
     }
 }
 
 struct ServiceSnapshotRow: View {
     let metrics: UsageMetrics
+    let subscriptionLabel: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Image(systemName: metrics.service.iconName)
-                    .foregroundColor(metrics.overallStatus.color)
+                Image(systemName: metrics.service.iconSymbolName).foregroundColor(metrics.service.brandColor)
                 Text(metrics.service.displayName)
                     .font(.headline)
                 Spacer()
                 StatusIndicator(status: metrics.overallStatus)
-                Image(systemName: "gearshape")
+                Image(systemName: "chevron.up")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
 
             Divider()
 
-            if let sessionLimit = metrics.sessionLimit {
-                LimitRow(title: "Session", limit: sessionLimit)
+            ForEach(metrics.limits) { limit in
+                LimitRow(title: limit.verboseLabel, limit: limit)
             }
 
-            if let weeklyLimit = metrics.weeklyLimit {
-                LimitRow(title: "Weekly", limit: weeklyLimit)
+            HStack {
+                Text(subscriptionLabel)
+                    .font(.caption)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.green.opacity(0.2))
+                    .cornerRadius(4)
+                Spacer()
+                Text("Updated: \(formatDate(metrics.lastUpdated))")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
-
-            if let codeReviewLimit = metrics.codeReviewLimit {
-                LimitRow(title: "Code Review", limit: codeReviewLimit)
-            }
-
-            Text("Updated: \(formatDate(metrics.lastUpdated))")
-                .font(.caption)
-                .foregroundColor(.secondary)
         }
         .padding()
         .background(MacOSCardBackground())
@@ -273,8 +311,7 @@ struct ClaudeCodeSnapshotRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Image(systemName: metrics.service.iconName)
-                    .foregroundColor(metrics.overallStatus.color)
+                Image(systemName: metrics.service.iconSymbolName).foregroundColor(metrics.service.brandColor)
                 Text(metrics.service.displayName)
                     .font(.headline)
                 Spacer()
@@ -286,16 +323,8 @@ struct ClaudeCodeSnapshotRow: View {
 
             Divider()
 
-            if let sessionLimit = metrics.sessionLimit {
-                LimitRow(title: "Session (5h)", limit: sessionLimit)
-            }
-
-            if let weeklyLimit = metrics.weeklyLimit {
-                LimitRow(title: "All Models (7d)", limit: weeklyLimit)
-            }
-
-            if let sonnetLimit = metrics.codeReviewLimit {
-                LimitRow(title: "Sonnet (7d)", limit: sonnetLimit)
+            ForEach(metrics.limits) { limit in
+                LimitRow(title: limit.verboseLabel, limit: limit)
             }
 
             HStack {
@@ -323,29 +352,20 @@ struct CursorSnapshotRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Image(systemName: metrics.service.iconName)
-                    .foregroundColor(.blue)
+                Image(systemName: metrics.service.iconSymbolName).foregroundColor(metrics.service.brandColor)
                 Text(metrics.service.displayName)
                     .font(.headline)
                 Spacer()
                 StatusIndicator(status: metrics.overallStatus)
-                Image(systemName: "gearshape")
+                Image(systemName: "chevron.up")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
 
             Divider()
 
-            if let sessionLimit = metrics.sessionLimit {
-                LimitRow(title: "Session", limit: sessionLimit)
-            }
-
-            if let weeklyLimit = metrics.weeklyLimit {
-                LimitRow(title: "Monthly", limit: weeklyLimit)
-            }
-
-            if let additionalLimit = metrics.codeReviewLimit {
-                LimitRow(title: "Additional", limit: additionalLimit)
+            ForEach(metrics.limits) { limit in
+                LimitRow(title: limit.verboseLabel, limit: limit)
             }
 
             HStack {
@@ -383,16 +403,11 @@ struct LimitRow: View {
 
             UsageProgressBar(progress: limit.total > 0 ? limit.used / limit.total : 0, tint: limit.statusColor.color)
 
-            HStack {
-                Text("\(formatNumber(limit.used)) / \(formatNumber(limit.total))")
+            if let resetTime = limit.resetTime {
+                Text("Resets: \(formatResetTime(resetTime))")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Spacer()
-                if let resetTime = limit.resetTime {
-                    Text("Resets: \(formatResetTime(resetTime))")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
     }
@@ -412,45 +427,65 @@ struct WidgetMediumSnapshotView: View {
     let metrics: [UsageMetrics]
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .topTrailing) {
             MacOSWidgetBackground()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Quota Guard")
-                    .font(.headline)
-
+            HStack(alignment: .top, spacing: 10) {
                 ForEach(metrics) { entry in
-                    WidgetServiceCompactView(metrics: entry)
+                    WidgetServiceColumnView(metrics: entry)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
             }
-            .padding()
+            .padding(.top, 30)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 12))
+                .foregroundColor(.primary)
+                .padding(.top, 10)
+                .padding(.trailing, 14)
         }
-        .frame(width: 340, height: 170, alignment: .center)
+        .frame(width: 340, height: 170)
     }
 }
 
-struct WidgetServiceCompactView: View {
+struct WidgetServiceColumnView: View {
     let metrics: UsageMetrics
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Image(systemName: metrics.service.iconName)
-                    .foregroundColor(metrics.overallStatus.color)
-                Text(metrics.service.displayName)
-                    .font(.subheadline)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 4) {
+                BrandIcon.image(for: metrics.service, size: 14)
+                Text(compactDisplayName(metrics.service))
+                    .font(.caption2)
                     .bold()
-                Spacer()
+                    .lineLimit(1)
+                Spacer(minLength: 2)
                 WidgetStatusIndicator(status: metrics.overallStatus)
             }
 
-            if let weeklyLimit = metrics.weeklyLimit {
-                HStack {
-                    UsageProgressBar(progress: weeklyLimit.total > 0 ? weeklyLimit.used / weeklyLimit.total : 0, tint: weeklyLimit.statusColor.color)
-                    Text("\(Int(weeklyLimit.percentage))%")
-                        .font(.caption)
+            ForEach(metrics.limits) { limit in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(limit.verboseLabel)
+                        .font(.system(size: 10))
+                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        UsageProgressBar(progress: limit.total > 0 ? limit.used / limit.total : 0, tint: limit.statusColor.color)
+                        Text("\(Int(limit.percentage))%")
+                            .font(.system(size: 10))
+                    }
                 }
             }
+        }
+    }
+
+    private func compactDisplayName(_ service: ServiceType) -> String {
+        switch service {
+        case .claudeCode: return "Claude"
+        case .codexCli:   return "OpenAI"
+        case .cursor:     return "Cursor"
         }
     }
 }
@@ -481,13 +516,6 @@ struct UsageProgressBar: View {
         }
         .frame(height: 6)
     }
-}
-
-func formatNumber(_ value: Double) -> String {
-    if value >= 1000 {
-        return String(format: "%.1fk", value / 1000)
-    }
-    return String(format: "%.0f", value)
 }
 
 func formatResetTime(_ date: Date) -> String {
@@ -574,35 +602,39 @@ struct SnapshotRenderer {
 
         let claudeCodeMetrics = UsageMetrics(
             service: .claudeCode,
-            sessionLimit: UsageLimit(used: 42, total: 100, resetTime: now.addingTimeInterval(2 * 60 * 60)),
-            weeklyLimit: UsageLimit(used: 78, total: 100, resetTime: now.addingTimeInterval(3 * 24 * 60 * 60)),
-            codeReviewLimit: UsageLimit(used: 91, total: 100, resetTime: now.addingTimeInterval(3 * 24 * 60 * 60)),
+            limits: [
+                UsageLimit(compactLabel: "S", verboseLabel: "Session (5h)", used: 42, total: 100, resetTime: now.addingTimeInterval(2 * 60 * 60)),
+                UsageLimit(compactLabel: "W", verboseLabel: "All Models (7d)", used: 78, total: 100, resetTime: now.addingTimeInterval(3 * 24 * 60 * 60)),
+                UsageLimit(compactLabel: "Sn", verboseLabel: "Sonnet (7d)", used: 91, total: 100, resetTime: now.addingTimeInterval(3 * 24 * 60 * 60)),
+            ],
             lastUpdated: now.addingTimeInterval(-18 * 60)
         )
 
-        let openAIMetrics = UsageMetrics(
-            service: .openai,
-            sessionLimit: UsageLimit(used: 1200, total: 5000, resetTime: now.addingTimeInterval(5 * 60 * 60)),
-            weeklyLimit: UsageLimit(used: 6200, total: 10000, resetTime: now.addingTimeInterval(6 * 24 * 60 * 60)),
-            codeReviewLimit: nil,
+        let codexMetrics = UsageMetrics(
+            service: .codexCli,
+            limits: [
+                UsageLimit(compactLabel: "S", verboseLabel: "Session (5h)", used: 24, total: 100, resetTime: now.addingTimeInterval(5 * 60 * 60)),
+                UsageLimit(compactLabel: "W", verboseLabel: "Weekly", used: 62, total: 100, resetTime: now.addingTimeInterval(6 * 24 * 60 * 60)),
+            ],
             lastUpdated: now.addingTimeInterval(-42 * 60)
         )
 
         let cursorMetrics = UsageMetrics(
             service: .cursor,
-            sessionLimit: UsageLimit(used: 180, total: 500, resetTime: now.addingTimeInterval(3 * 60 * 60)),
-            weeklyLimit: UsageLimit(used: 760, total: 1000, resetTime: now.addingTimeInterval(12 * 24 * 60 * 60)),
-            codeReviewLimit: UsageLimit(used: 140, total: 200, resetTime: now.addingTimeInterval(12 * 24 * 60 * 60)),
+            limits: [
+                UsageLimit(compactLabel: "API", verboseLabel: "API", used: 26, total: 100, resetTime: now.addingTimeInterval(12 * 24 * 60 * 60)),
+                UsageLimit(compactLabel: "M", verboseLabel: "Monthly", used: 26, total: 100, resetTime: now.addingTimeInterval(12 * 24 * 60 * 60)),
+            ],
             lastUpdated: now.addingTimeInterval(-95 * 60)
         )
 
         let menuBarView = MenuBarSnapshotView(
             claudeCodeMetrics: claudeCodeMetrics,
-            openAIMetrics: openAIMetrics,
+            codexMetrics: codexMetrics,
             cursorMetrics: cursorMetrics
         )
 
-        let widgetView = WidgetMediumSnapshotView(metrics: [claudeCodeMetrics, openAIMetrics, cursorMetrics])
+        let widgetView = WidgetMediumSnapshotView(metrics: [claudeCodeMetrics, codexMetrics, cursorMetrics])
 
         let menuBarSize = CGSize(width: 320, height: 500)
         let widgetSize = CGSize(width: 340, height: 170)

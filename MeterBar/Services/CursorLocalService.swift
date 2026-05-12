@@ -282,41 +282,43 @@ class CursorLocalService: ObservableObject {
         print("[CursorLocalService] Total usage: \(totalPercentUsed)% (auto: \(autoPercentUsed)%, api: \(apiPercentUsed)%)")
         print("[CursorLocalService] Billing cycle end: \(summaryData.billingCycleEnd ?? "unknown")")
 
-        let monthlyLimit = UsageLimit(
-            used: totalPercentUsed,
-            total: 100,
-            resetTime: resetTime
-        )
-
-        // API % is the real-dollar cliff: overflow past 100% bills against on-demand spend.
+        // Order: API headline, then On-Demand (only when opted in), then Monthly.
+        // API % is the real spend cliff — overflow past 100% bills against
+        // on-demand. Monthly is the at-a-glance total most users care about
+        // last.
         let apiLimit = UsageLimit(
+            compactLabel: "API",
+            verboseLabel: "API",
             used: apiPercentUsed,
             total: 100,
             resetTime: resetTime
         )
 
-        // On-demand is the fallback once API is exhausted — only meaningful when the user opted in.
-        var onDemandLimit: UsageLimit? = nil
+        var limits: [UsageLimit] = [apiLimit]
+
         if let onDemand = summaryData.individualUsage?.onDemand, onDemand.enabled == true {
             let onDemandUsed = Double(onDemand.used ?? 0)
             let onDemandCap = Double(onDemand.limit ?? 0)
             if onDemandUsed > 0 || onDemandCap > 0 {
-                onDemandLimit = UsageLimit(
+                limits.append(UsageLimit(
+                    compactLabel: "OD",
+                    verboseLabel: "On-Demand",
                     used: onDemandUsed,
                     total: onDemandCap > 0 ? onDemandCap : onDemandUsed * 1.5,
                     resetTime: resetTime
-                )
+                ))
             }
         }
 
-        print("[CursorLocalService] Successfully fetched Cursor usage data")
+        limits.append(UsageLimit(
+            compactLabel: "M",
+            verboseLabel: "Monthly",
+            used: totalPercentUsed,
+            total: 100,
+            resetTime: resetTime
+        ))
 
-        return UsageMetrics(
-            service: .cursor,
-            sessionLimit: apiLimit,
-            weeklyLimit: monthlyLimit,
-            codeReviewLimit: onDemandLimit
-        )
+        return UsageMetrics(service: .cursor, limits: limits)
     }
 
     // MARK: - API Calls

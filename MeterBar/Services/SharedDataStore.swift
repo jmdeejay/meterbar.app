@@ -11,7 +11,7 @@ class SharedDataStore {
     static let shared = SharedDataStore()
     
     private let appGroupIdentifier = "group.com.jmdeejay.meterbar"
-    private let metricsKey = "cached_usage_metrics"
+    private let metricsKey = "cached_usage_metrics_v2"
     
     private var containerURL: URL? {
         return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier)

@@ -1,6 +1,13 @@
 import XCTest
 @testable import MeterBar
 
+private extension UsageMetrics {
+    /// Test convenience: find a limit by its compact label.
+    func limit(_ compactLabel: String) -> UsageLimit? {
+        limits.first { $0.compactLabel == compactLabel }
+    }
+}
+
 /// Integration tests to verify API access for Claude, OpenAI, Cursor, Claude Code, and Codex CLI services.
 /// These tests make real API calls and require valid credentials to be set up.
 final class APIIntegrationTests: XCTestCase {
@@ -38,7 +45,7 @@ final class APIIntegrationTests: XCTestCase {
             print("\nUsage Data Retrieved:")
             print("  Service: \(metrics.service.displayName)")
 
-            if let weekly = metrics.weeklyLimit {
+            if let weekly = metrics.limit("W") {
                 print("  Weekly Usage:")
                 print("    - Used: \(formatTokens(weekly.used)) tokens")
                 print("    - Total: \(formatTokens(weekly.total)) tokens")
@@ -49,7 +56,7 @@ final class APIIntegrationTests: XCTestCase {
             }
 
             XCTAssertEqual(metrics.service, .claude)
-            XCTAssertNotNil(metrics.weeklyLimit)
+            XCTAssertNotNil(metrics.limit("W"))
 
         } catch {
             print("❌ FAILED: \(error.localizedDescription)")
@@ -85,7 +92,7 @@ final class APIIntegrationTests: XCTestCase {
             print("\nUsage Data Retrieved:")
             print("  Service: \(metrics.service.displayName)")
 
-            if let weekly = metrics.weeklyLimit {
+            if let weekly = metrics.limit("W") {
                 print("  Weekly Usage:")
                 print("    - Used: \(formatTokens(weekly.used)) tokens")
                 print("    - Total: \(formatTokens(weekly.total)) tokens")
@@ -96,7 +103,7 @@ final class APIIntegrationTests: XCTestCase {
             }
 
             XCTAssertEqual(metrics.service, .openai)
-            XCTAssertNotNil(metrics.weeklyLimit)
+            XCTAssertNotNil(metrics.limit("W"))
 
         } catch {
             print("❌ FAILED: \(error.localizedDescription)")
@@ -137,7 +144,7 @@ final class APIIntegrationTests: XCTestCase {
             print("\nUsage Data Retrieved:")
             print("  Service: \(metrics.service.displayName)")
 
-            if let session = metrics.sessionLimit {
+            if let session = metrics.limit("S") {
                 print("  5-Hour Session:")
                 print("    - Utilization: \(String(format: "%.1f", session.used))%")
                 if let resetTime = session.resetTime {
@@ -145,7 +152,7 @@ final class APIIntegrationTests: XCTestCase {
                 }
             }
 
-            if let weekly = metrics.weeklyLimit {
+            if let weekly = metrics.limit("W") {
                 print("  7-Day Weekly:")
                 print("    - Utilization: \(String(format: "%.1f", weekly.used))%")
                 if let resetTime = weekly.resetTime {
@@ -153,7 +160,7 @@ final class APIIntegrationTests: XCTestCase {
                 }
             }
 
-            if let sonnet = metrics.codeReviewLimit {
+            if let sonnet = metrics.limits.last {
                 print("  7-Day Sonnet:")
                 print("    - Utilization: \(String(format: "%.1f", sonnet.used))%")
                 if let resetTime = sonnet.resetTime {
@@ -162,8 +169,8 @@ final class APIIntegrationTests: XCTestCase {
             }
 
             XCTAssertEqual(metrics.service, .claudeCode)
-            XCTAssertNotNil(metrics.sessionLimit)
-            XCTAssertNotNil(metrics.weeklyLimit)
+            XCTAssertNotNil(metrics.limit("S"))
+            XCTAssertNotNil(metrics.limit("W"))
 
         } catch {
             print("❌ FAILED: \(error.localizedDescription)")
@@ -217,7 +224,7 @@ final class APIIntegrationTests: XCTestCase {
             print("\nUsage Data Retrieved:")
             print("  Service: \(metrics.service.displayName)")
 
-            if let session = metrics.sessionLimit {
+            if let session = metrics.limit("S") {
                 print("  5-Hour Session:")
                 print("    - Utilization: \(String(format: "%.1f", session.used))%")
                 if let resetTime = session.resetTime {
@@ -225,7 +232,7 @@ final class APIIntegrationTests: XCTestCase {
                 }
             }
 
-            if let weekly = metrics.weeklyLimit {
+            if let weekly = metrics.limit("W") {
                 print("  7-Day Weekly:")
                 print("    - Utilization: \(String(format: "%.1f", weekly.used))%")
                 if let resetTime = weekly.resetTime {
@@ -233,7 +240,7 @@ final class APIIntegrationTests: XCTestCase {
                 }
             }
 
-            if let codeReview = metrics.codeReviewLimit {
+            if let codeReview = metrics.limits.last {
                 print("  Code Review:")
                 print("    - Utilization: \(String(format: "%.1f", codeReview.used))%")
                 if let resetTime = codeReview.resetTime {
@@ -243,7 +250,7 @@ final class APIIntegrationTests: XCTestCase {
 
             XCTAssertEqual(metrics.service, .codexCli)
             // Note: sessionLimit may be nil for free accounts
-            // XCTAssertNotNil(metrics.sessionLimit)
+            // XCTAssertNotNil(metrics.limit("S"))
 
         } catch {
             print("❌ FAILED: \(error.localizedDescription)")
@@ -290,18 +297,14 @@ final class APIIntegrationTests: XCTestCase {
             print("\nUsage Data Retrieved:")
             print("  Service: \(metrics.service.displayName)")
 
-            if let session = metrics.sessionLimit {
-                print("  Session Usage:")
-                print("    - Used: \(String(format: "%.0f", session.used))")
-                print("    - Limit: \(String(format: "%.0f", session.total))")
-                print("    - Percentage: \(String(format: "%.1f", session.percentage))%")
+            if let api = metrics.limit("API") {
+                print("  API Usage:")
+                print("    - Used: \(String(format: "%.1f", api.used))%")
             }
 
-            if let monthly = metrics.weeklyLimit {
+            if let monthly = metrics.limit("M") {
                 print("  Monthly Usage:")
-                print("    - Used: \(String(format: "%.0f", monthly.used))")
-                print("    - Limit: \(String(format: "%.0f", monthly.total))")
-                print("    - Percentage: \(String(format: "%.1f", monthly.percentage))%")
+                print("    - Used: \(String(format: "%.1f", monthly.used))%")
                 if let resetTime = monthly.resetTime {
                     print("    - Resets: \(formatDate(resetTime))")
                 }
@@ -349,7 +352,7 @@ final class APIIntegrationTests: XCTestCase {
         if authManager.isClaudeAuthenticated {
             do {
                 let metrics = try await ClaudeService.shared.fetchUsageMetrics()
-                let usage = metrics.weeklyLimit.map { "\(String(format: "%.1f", $0.percentage))% used" } ?? "N/A"
+                let usage = metrics.limit("W").map { "\(String(format: "%.1f", $0.percentage))% used" } ?? "N/A"
                 results.append(("Claude", "✅ Connected", usage))
             } catch {
                 results.append(("Claude", "❌ Error", error.localizedDescription))
@@ -362,7 +365,7 @@ final class APIIntegrationTests: XCTestCase {
         if authManager.isOpenAIAuthenticated {
             do {
                 let metrics = try await OpenAIService.shared.fetchUsageMetrics()
-                let usage = metrics.weeklyLimit.map { "\(String(format: "%.1f", $0.percentage))% used" } ?? "N/A"
+                let usage = metrics.limit("W").map { "\(String(format: "%.1f", $0.percentage))% used" } ?? "N/A"
                 results.append(("OpenAI", "✅ Connected", usage))
             } catch {
                 results.append(("OpenAI", "❌ Error", error.localizedDescription))
@@ -375,7 +378,7 @@ final class APIIntegrationTests: XCTestCase {
         if claudeCodeService.hasAccess {
             do {
                 let metrics = try await claudeCodeService.fetchUsageMetrics()
-                let usage = metrics.weeklyLimit.map { "\(String(format: "%.1f", $0.percentage))% used" } ?? "N/A"
+                let usage = metrics.limit("W").map { "\(String(format: "%.1f", $0.percentage))% used" } ?? "N/A"
                 results.append(("Claude Code", "✅ Connected", usage))
             } catch {
                 results.append(("Claude Code", "❌ Error", "\(error.localizedDescription.prefix(40))..."))
@@ -388,7 +391,7 @@ final class APIIntegrationTests: XCTestCase {
         if codexCliService.hasAccess {
             do {
                 let metrics = try await codexCliService.fetchUsageMetrics()
-                let usage = metrics.sessionLimit.map { "\(String(format: "%.1f", $0.percentage))% (5h)" } ?? "N/A"
+                let usage = metrics.limit("S").map { "\(String(format: "%.1f", $0.percentage))% (5h)" } ?? "N/A"
                 results.append(("Codex CLI", "✅ Connected", usage))
             } catch {
                 results.append(("Codex CLI", "❌ Error", "\(error.localizedDescription.prefix(40))..."))
@@ -401,7 +404,7 @@ final class APIIntegrationTests: XCTestCase {
         if cursorService.hasAccess {
             do {
                 let metrics = try await cursorService.fetchUsageMetrics()
-                let usage = metrics.weeklyLimit.map { "\(String(format: "%.1f", $0.percentage))% used" } ?? "N/A"
+                let usage = metrics.limit("M").map { "\(String(format: "%.1f", $0.percentage))% used" } ?? "N/A"
                 results.append(("Cursor", "✅ Connected", usage))
             } catch {
                 results.append(("Cursor", "❌ Error", "\(error.localizedDescription.prefix(40))..."))

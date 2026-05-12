@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 enum ServiceType: String, Codable, CaseIterable, Identifiable {
     case claude = "Claude"
@@ -26,6 +27,14 @@ enum ServiceType: String, Codable, CaseIterable, Identifiable {
         case .openai: return "brain"
         case .codexCli: return "terminal.fill"
         case .cursor: return "cursorarrow.click"
+        }
+    }
+
+    var brandColor: Color {
+        switch self {
+        case .claude, .claudeCode: return Color(red: 224/255, green: 128/255, blue: 0/255)   // #E08000
+        case .openai, .codexCli:   return Color(red: 144/255, green: 112/255, blue: 240/255) // #9070F0
+        case .cursor:              return Color(red:  16/255, green: 192/255, blue: 224/255) // #10C0E0
         }
     }
 }

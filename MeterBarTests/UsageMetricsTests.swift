@@ -2,33 +2,27 @@ import XCTest
 @testable import MeterBar
 
 final class UsageMetricsTests: XCTestCase {
-    // MARK: - Initialization Tests
+    private func limit(_ used: Double, _ total: Double = 100, label: String = "L") -> UsageLimit {
+        UsageLimit(compactLabel: label, verboseLabel: label, used: used, total: total)
+    }
 
-    func testInitializationWithAllLimits() {
-        let session = UsageLimit(used: 50, total: 100, resetTime: nil)
-        let weekly = UsageLimit(used: 200, total: 500, resetTime: nil)
-        let codeReview = UsageLimit(used: 10, total: 50, resetTime: nil)
+    // MARK: - Initialization
 
+    func testInitializationWithLimits() {
         let metrics = UsageMetrics(
             service: .claudeCode,
-            sessionLimit: session,
-            weeklyLimit: weekly,
-            codeReviewLimit: codeReview
+            limits: [limit(50), limit(200, 500), limit(10, 50)]
         )
 
         XCTAssertEqual(metrics.service, .claudeCode)
-        XCTAssertNotNil(metrics.sessionLimit)
-        XCTAssertNotNil(metrics.weeklyLimit)
-        XCTAssertNotNil(metrics.codeReviewLimit)
+        XCTAssertEqual(metrics.limits.count, 3)
     }
 
     func testInitializationWithNoLimits() {
         let metrics = UsageMetrics(service: .cursor)
 
         XCTAssertEqual(metrics.service, .cursor)
-        XCTAssertNil(metrics.sessionLimit)
-        XCTAssertNil(metrics.weeklyLimit)
-        XCTAssertNil(metrics.codeReviewLimit)
+        XCTAssertTrue(metrics.limits.isEmpty)
     }
 
     func testIdIsUnique() {
@@ -38,29 +32,10 @@ final class UsageMetricsTests: XCTestCase {
         XCTAssertNotEqual(metrics1.id, metrics2.id)
     }
 
-    // MARK: - hasData Tests
+    // MARK: - hasData
 
-    func testHasDataWithSessionLimit() {
-        let metrics = UsageMetrics(
-            service: .claudeCode,
-            sessionLimit: UsageLimit(used: 50, total: 100, resetTime: nil)
-        )
-        XCTAssertTrue(metrics.hasData)
-    }
-
-    func testHasDataWithWeeklyLimit() {
-        let metrics = UsageMetrics(
-            service: .claudeCode,
-            weeklyLimit: UsageLimit(used: 50, total: 100, resetTime: nil)
-        )
-        XCTAssertTrue(metrics.hasData)
-    }
-
-    func testHasDataWithCodeReviewLimit() {
-        let metrics = UsageMetrics(
-            service: .claudeCode,
-            codeReviewLimit: UsageLimit(used: 50, total: 100, resetTime: nil)
-        )
+    func testHasDataWithSingleLimit() {
+        let metrics = UsageMetrics(service: .claudeCode, limits: [limit(50)])
         XCTAssertTrue(metrics.hasData)
     }
 
@@ -69,13 +44,12 @@ final class UsageMetricsTests: XCTestCase {
         XCTAssertFalse(metrics.hasData)
     }
 
-    // MARK: - overallStatus Tests
+    // MARK: - overallStatus
 
     func testOverallStatusGoodWhenAllLimitsLow() {
         let metrics = UsageMetrics(
             service: .claudeCode,
-            sessionLimit: UsageLimit(used: 20, total: 100, resetTime: nil),
-            weeklyLimit: UsageLimit(used: 30, total: 100, resetTime: nil)
+            limits: [limit(20), limit(30)]
         )
         XCTAssertEqual(metrics.overallStatus, .good)
     }
@@ -83,8 +57,7 @@ final class UsageMetricsTests: XCTestCase {
     func testOverallStatusWarningWhenAnyLimitNearLimit() {
         let metrics = UsageMetrics(
             service: .claudeCode,
-            sessionLimit: UsageLimit(used: 20, total: 100, resetTime: nil),
-            weeklyLimit: UsageLimit(used: 85, total: 100, resetTime: nil) // 85% = near limit
+            limits: [limit(20), limit(85)] // 85% triggers warning
         )
         XCTAssertEqual(metrics.overallStatus, .warning)
     }
@@ -92,18 +65,15 @@ final class UsageMetricsTests: XCTestCase {
     func testOverallStatusCriticalWhenAnyLimitAtLimit() {
         let metrics = UsageMetrics(
             service: .claudeCode,
-            sessionLimit: UsageLimit(used: 100, total: 100, resetTime: nil), // 100% = at limit
-            weeklyLimit: UsageLimit(used: 50, total: 100, resetTime: nil)
+            limits: [limit(100), limit(50)]
         )
         XCTAssertEqual(metrics.overallStatus, .critical)
     }
 
     func testOverallStatusCriticalOverridesWarning() {
-        // Even if one limit is at warning, critical should take precedence
         let metrics = UsageMetrics(
             service: .claudeCode,
-            sessionLimit: UsageLimit(used: 120, total: 100, resetTime: nil), // Over limit
-            weeklyLimit: UsageLimit(used: 85, total: 100, resetTime: nil) // Warning level
+            limits: [limit(120), limit(85)]
         )
         XCTAssertEqual(metrics.overallStatus, .critical)
     }
@@ -113,23 +83,25 @@ final class UsageMetricsTests: XCTestCase {
         XCTAssertEqual(metrics.overallStatus, .good)
     }
 
-    // MARK: - Codable Tests
+    // MARK: - Codable
 
     func testCodable() throws {
         let original = UsageMetrics(
             service: .claudeCode,
-            sessionLimit: UsageLimit(used: 50, total: 100, resetTime: Date()),
-            weeklyLimit: UsageLimit(used: 200, total: 500, resetTime: nil)
+            limits: [
+                UsageLimit(compactLabel: "S", verboseLabel: "Session (5h)", used: 50, total: 100, resetTime: Date()),
+                UsageLimit(compactLabel: "W", verboseLabel: "Weekly", used: 200, total: 500)
+            ]
         )
 
-        let encoder = JSONEncoder()
-        let decoder = JSONDecoder()
-
-        let encoded = try encoder.encode(original)
-        let decoded = try decoder.decode(UsageMetrics.self, from: encoded)
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(UsageMetrics.self, from: encoded)
 
         XCTAssertEqual(decoded.service, original.service)
-        XCTAssertEqual(decoded.sessionLimit?.used, original.sessionLimit?.used)
-        XCTAssertEqual(decoded.weeklyLimit?.total, original.weeklyLimit?.total)
+        XCTAssertEqual(decoded.limits.count, 2)
+        XCTAssertEqual(decoded.limits.first?.compactLabel, "S")
+        XCTAssertEqual(decoded.limits.first?.verboseLabel, "Session (5h)")
+        XCTAssertEqual(decoded.limits.first?.used, 50)
+        XCTAssertEqual(decoded.limits.last?.total, 500)
     }
 }
