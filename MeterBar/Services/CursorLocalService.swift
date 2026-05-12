@@ -273,30 +273,37 @@ class CursorLocalService: ObservableObject {
             }
         }
 
-        // Extract usage from individual plan
-        let planUsed = Double(summaryData.individualUsage?.plan?.used ?? 0)
-        let planTotal = Double(summaryData.individualUsage?.plan?.total ?? 500)
+        // Use Cursor's precomputed total percentage so the meter matches the dashboard's "Total" indicator.
+        let totalPercentUsed = summaryData.individualUsage?.plan?.totalPercentUsed ?? 0
+        let autoPercentUsed = summaryData.individualUsage?.plan?.autoPercentUsed ?? 0
+        let apiPercentUsed = summaryData.individualUsage?.plan?.apiPercentUsed ?? 0
 
         print("[CursorLocalService] Plan type: \(summaryData.membershipType ?? "unknown")")
-        print("[CursorLocalService] Plan usage: \(Int(planUsed)) / \(Int(planTotal))")
+        print("[CursorLocalService] Total usage: \(totalPercentUsed)% (auto: \(autoPercentUsed)%, api: \(apiPercentUsed)%)")
         print("[CursorLocalService] Billing cycle end: \(summaryData.billingCycleEnd ?? "unknown")")
 
-        // Create usage metrics using plan data
-        let weeklyLimit = UsageLimit(
-            used: planUsed,
-            total: planTotal,
+        let monthlyLimit = UsageLimit(
+            used: totalPercentUsed,
+            total: 100,
             resetTime: resetTime
         )
 
-        // On-demand usage as secondary metric if enabled
-        var sessionLimit: UsageLimit? = nil
+        // API % is the real-dollar cliff: overflow past 100% bills against on-demand spend.
+        let apiLimit = UsageLimit(
+            used: apiPercentUsed,
+            total: 100,
+            resetTime: resetTime
+        )
+
+        // On-demand is the fallback once API is exhausted — only meaningful when the user opted in.
+        var onDemandLimit: UsageLimit? = nil
         if let onDemand = summaryData.individualUsage?.onDemand, onDemand.enabled == true {
             let onDemandUsed = Double(onDemand.used ?? 0)
-            let onDemandLimit = Double(onDemand.limit ?? 0)
-            if onDemandUsed > 0 || onDemandLimit > 0 {
-                sessionLimit = UsageLimit(
+            let onDemandCap = Double(onDemand.limit ?? 0)
+            if onDemandUsed > 0 || onDemandCap > 0 {
+                onDemandLimit = UsageLimit(
                     used: onDemandUsed,
-                    total: onDemandLimit > 0 ? onDemandLimit : onDemandUsed * 1.5,
+                    total: onDemandCap > 0 ? onDemandCap : onDemandUsed * 1.5,
                     resetTime: resetTime
                 )
             }
@@ -306,9 +313,9 @@ class CursorLocalService: ObservableObject {
 
         return UsageMetrics(
             service: .cursor,
-            sessionLimit: sessionLimit,
-            weeklyLimit: weeklyLimit,
-            codeReviewLimit: nil
+            sessionLimit: apiLimit,
+            weeklyLimit: monthlyLimit,
+            codeReviewLimit: onDemandLimit
         )
     }
 
@@ -374,7 +381,7 @@ class CursorLocalService: ObservableObject {
         let decoder = JSONDecoder()
         do {
             let summaryResponse = try decoder.decode(CursorUsageSummaryResponse.self, from: data)
-            print("[CursorLocalService] Parsed usage summary: used=\(summaryResponse.individualUsage?.plan?.used ?? 0), total=\(summaryResponse.individualUsage?.plan?.total ?? 0)")
+            print("[CursorLocalService] Parsed usage summary: totalPercentUsed=\(summaryResponse.individualUsage?.plan?.totalPercentUsed ?? 0)")
             return summaryResponse
         } catch {
             print("[CursorLocalService] JSON decode error: \(error)")
@@ -405,9 +412,9 @@ struct CursorPlanUsage: Decodable {
     let used: Int?
     let limit: Int?
     let remaining: Int?
-    let included: Int?
-    let bonus: Int?
-    let total: Int?
+    let autoPercentUsed: Double?
+    let apiPercentUsed: Double?
+    let totalPercentUsed: Double?
 }
 
 struct CursorOnDemandUsage: Decodable {

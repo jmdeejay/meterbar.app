@@ -34,8 +34,8 @@ final class ServiceLabelsTests: XCTestCase {
     }
 
     func testSessionLabel_cursor() {
-        XCTAssertEqual(ServiceLabels.sessionLabel(for: "Cursor", verbose: true),  "On-Demand")
-        XCTAssertEqual(ServiceLabels.sessionLabel(for: "Cursor", verbose: false), "OD")
+        XCTAssertEqual(ServiceLabels.sessionLabel(for: "Cursor", verbose: true),  "API")
+        XCTAssertEqual(ServiceLabels.sessionLabel(for: "Cursor", verbose: false), "API")
     }
 
     func testSessionLabel_unknownService_returnsEmpty() {
@@ -78,8 +78,8 @@ final class ServiceLabelsTests: XCTestCase {
     }
 
     func testCodeReviewLabel_cursor() {
-        XCTAssertEqual(ServiceLabels.codeReviewLabel(for: "Cursor", verbose: true),  "Code Review")
-        XCTAssertEqual(ServiceLabels.codeReviewLabel(for: "Cursor", verbose: false), "CR")
+        XCTAssertEqual(ServiceLabels.codeReviewLabel(for: "Cursor", verbose: true),  "On-Demand")
+        XCTAssertEqual(ServiceLabels.codeReviewLabel(for: "Cursor", verbose: false), "OD")
     }
 
     func testCodeReviewLabel_unknownService_returnsEmpty() {

@@ -366,7 +366,7 @@ struct LargeWidgetView: View {
     let entry: UsageWidgetEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 28) {
+        VStack(alignment: .leading, spacing: 12) {
             if entry.metrics.isEmpty {
                 EmptyServicesView()
             } else {

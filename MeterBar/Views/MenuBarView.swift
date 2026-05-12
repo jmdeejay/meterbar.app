@@ -394,6 +394,14 @@ struct CursorServiceRow: View {
             if isExpanded, hasAccess, let metrics = metrics {
                 Divider()
 
+                if let apiLimit = metrics.sessionLimit {
+                    LimitRow(title: "API", limit: apiLimit)
+                }
+
+                if let onDemandLimit = metrics.codeReviewLimit {
+                    LimitRow(title: "On-Demand", limit: onDemandLimit)
+                }
+
                 if let weeklyLimit = metrics.weeklyLimit {
                     LimitRow(title: "Monthly", limit: weeklyLimit)
                 }

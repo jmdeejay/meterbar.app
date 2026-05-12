@@ -19,7 +19,7 @@ enum ServiceLabels {
         switch serviceID {
         case "Claude Code": return verbose ? "Session (5h)" : "S"
         case "Codex CLI":   return verbose ? "Session (5h)" : "S"
-        case "Cursor":      return verbose ? "On-Demand"    : "OD"
+        case "Cursor":      return "API"
         default:            return ""
         }
     }
@@ -35,9 +35,10 @@ enum ServiceLabels {
 
     static func codeReviewLabel(for serviceID: String, verbose: Bool) -> String {
         switch serviceID {
-        case "Claude Code":         return verbose ? "Sonnet (7d)" : "Sn"
-        case "Codex CLI", "Cursor": return verbose ? "Code Review" : "CR"
-        default:                    return ""
+        case "Claude Code": return verbose ? "Sonnet (7d)" : "Sn"
+        case "Codex CLI":   return verbose ? "Code Review" : "CR"
+        case "Cursor":      return verbose ? "On-Demand"   : "OD"
+        default:            return ""
         }
     }
 }
