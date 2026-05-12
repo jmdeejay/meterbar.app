@@ -39,10 +39,10 @@ A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, and Curso
 - **Widget Support**: macOS widget for at-a-glance monitoring
 - **Multi-Service Support**: Track Claude Code, Codex CLI, and Cursor
 - **Local-First Auth**: Reads credentials from CLI tool config files (no API keys needed). \
-    Claude Code on macOS requires a one-click *Import from Keychain* the first time — no implicit cross-app keychain reads on every refresh.
-- **Real-time Updates**: Background refresh every 15 minutes
+    Claude Code on macOS requires a one-click *Import from Keychain* the first time. After that, MeterBar reads from `~/.claude/.credentials.json` on every refresh and only touches the Keychain again when the file's access token is about to expire — silently picking up rotated tokens written by the `claude` CLI (the *Always Allow* grant from the initial Import covers it).
+- **Real-time Updates**: Background refresh every 15 minutes by default (configurable in Settings → Refresh)
 - **Multi-Expand UI**: Service rows expand independently and the choice persists across launches
-- **Color-coded Status**: Green (good), Yellow (warning), Red (critical)
+- **Color-coded Status**: Green (good), Orange (warning), Red (critical)
 
 ## Supported Services
 
@@ -50,7 +50,7 @@ A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, and Curso
 |---------|-------------|-----------------|
 | **Claude Code** | OAuth token from `claude login` | 5h session, 7-day all models, 7-day Sonnet |
 | **Codex CLI** | OAuth token from `codex login` | 5h limit, weekly limit, code review |
-| **Cursor** | Local SQLite database | Monthly usage |
+| **Cursor** | Local SQLite (for auth) + Cursor API | API usage, On-Demand (if enabled), Monthly limit |
 
 ## Installation
 
@@ -81,7 +81,7 @@ Prerequisites: macOS 13.0+, Xcode 15.0+
 
 ```bash
 git clone https://github.com/shipshitdev/meterbar.app.git
-cd meterbarapp
+cd meterbar.app
 open MeterBar.xcodeproj
 # Build and run (Cmd+R)
 ```
@@ -96,7 +96,7 @@ If you're forking, run `./scripts/personalize-signing.sh --team YOUR_TEAM_ID --b
 2. Log in: `claude login`
 3. In MeterBar, expand the **Claude Code** row and click **Import from Keychain**. macOS will show a one-time consent prompt for the `Claude Code-credentials` keychain item — click **Always Allow**. MeterBar copies the OAuth blob into `~/.claude/.credentials.json` (mode `600`) and reads from that file on every refresh thereafter.
 
-> The keychain is only touched when you click Import. If Claude Code rotates its OAuth refresh token (rare), the section will return to *Not Connected* and you can click Import again. On Linux/non-keychain Claude Code installs, `~/.claude/.credentials.json` already exists and the import step is unnecessary.
+> After the initial Import, MeterBar reads the file copy on every refresh. When the access token gets close to expiry it silently re-reads the Keychain to pick up the new pair the `claude` CLI just wrote — no second prompt as long as you picked *Always Allow*. The section only falls back to *Not Connected* if `claude` hasn't been used recently enough to refresh the Keychain copy either; click Import again (or just run `claude` once) to recover. On Linux / non-keychain Claude Code installs, `~/.claude/.credentials.json` already exists and the import step is unnecessary.
 
 ### Codex CLI
 
@@ -130,9 +130,9 @@ If you're forking, run `./scripts/personalize-signing.sh --team YOUR_TEAM_ID --b
 
 | Color | Meaning |
 |-------|---------|
-| Green | < 50% used - plenty remaining |
-| Yellow | 50-80% used - approaching limit |
-| Red | > 80% used - near or at limit |
+| Green  | < 80% used — plenty of headroom |
+| Orange | 80-99% used — approaching limit |
+| Red    | ≥ 100% used — at or over the limit |
 
 ## CLI Tool
 
@@ -155,10 +155,7 @@ meterbar cost
 meterbar cost --days 7 --json
 ```
 
-The CLI is automatically installed when using Homebrew. For manual installs, it's located at:
-```
-/Applications/MeterBar.app/Contents/Helpers/meterbar
-```
+The CLI is automatically installed and put on your `PATH` when using Homebrew. For source builds, the binary is produced by SwiftPM at `MeterBarCLI/.build/debug/meterbar` (or `.build/release/meterbar` for a release build); add that directory to your `PATH` or copy the binary somewhere on it.
 
 ## How It Works
 
@@ -174,7 +171,7 @@ MeterBar reads authentication tokens from local files created by CLI tools:
 It then calls the respective APIs to fetch current usage data:
 - Claude Code: `https://api.anthropic.com/api/oauth/usage`
 - Codex: `https://chatgpt.com/backend-api/wham/usage`
-- Cursor: Local SQLite queries
+- Cursor: `https://cursor.com/api/usage-summary` (auth token sourced from the local SQLite DB)
 
 **No API keys are stored** - the app uses the same OAuth tokens as the CLI tools.
 
