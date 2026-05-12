@@ -83,7 +83,7 @@ struct SettingsView: View {
                         }
                     }
                 } else {
-                    Text("Claude Code stores its OAuth token in the macOS Keychain. Import it once into ~/.claude/.credentials.json so MeterBar can read it on every refresh.")
+                    Text("Claude Code stores its OAuth token in the macOS Keychain. The first Check Again imports it once into ~/.claude/.credentials.json; subsequent refreshes read the file directly.")
                         .font(.caption)
                         .foregroundColor(.secondary)
 
@@ -91,28 +91,20 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundColor(.orange)
 
-                    HStack {
-                        Button("Import from Keychain") {
-                            claudeCodeImportError = nil
-                            switch claudeCodeService.importCredentialsFromKeychain() {
-                            case .success:
-                                Task { await dataManager.refreshAll() }
-                            case .failure(let err):
+                    Button("Check Again") {
+                        claudeCodeImportError = nil
+                        claudeCodeService.checkAccess()
+                        if !claudeCodeService.hasAccess {
+                            if case .failure(let err) = claudeCodeService.importCredentialsFromKeychain() {
                                 if case .apiError(let msg) = err {
                                     claudeCodeImportError = msg
                                 } else {
                                     claudeCodeImportError = "\(err)"
                                 }
+                                return
                             }
                         }
-                        .buttonStyle(.borderedProminent)
-
-                        Button("Check Again") {
-                            claudeCodeService.checkAccess()
-                            if claudeCodeService.hasAccess {
-                                Task { await dataManager.refreshAll() }
-                            }
-                        }
+                        Task { await dataManager.refreshAll() }
                     }
 
                     if let msg = claudeCodeImportError {
