@@ -39,7 +39,7 @@ A lightweight macOS menu bar app that monitors Claude Code, Codex CLI, and Curso
 - **Widget Support**: macOS widget for at-a-glance monitoring
 - **Multi-Service Support**: Track Claude Code, Codex CLI, and Cursor
 - **Local-First Auth**: Reads credentials from CLI tool config files (no API keys needed). \
-    Claude Code on macOS requires a one-click *Import from Keychain* the first time. After that, MeterBar reads from `~/.claude/.credentials.json` on every refresh and only touches the Keychain again when the file's access token is about to expire — silently picking up rotated tokens written by the `claude` CLI (the *Always Allow* grant from the initial Import covers it).
+    Claude Code on macOS requires a one-click **Check Again** in the popover the first time. After that, MeterBar reads from `~/.claude/.credentials.json` on every refresh and only touches the Keychain again when the file's access token is about to expire — silently picking up rotated tokens written by the `claude` CLI (the *Always Allow* grant from the initial click covers it).
 - **Real-time Updates**: Background refresh every 15 minutes by default (configurable in Settings → Refresh)
 - **Multi-Expand UI**: Service rows expand independently and the choice persists across launches
 - **Color-coded Status**: Green (good), Orange (warning), Red (critical)
@@ -94,9 +94,9 @@ If you're forking, run `./scripts/personalize-signing.sh --team YOUR_TEAM_ID --b
 
 1. Install Claude Code CLI: `npm install -g @anthropic-ai/claude-code`
 2. Log in: `claude login`
-3. In MeterBar, expand the **Claude Code** row and click **Import from Keychain**. macOS will show a one-time consent prompt for the `Claude Code-credentials` keychain item — click **Always Allow**. MeterBar copies the OAuth blob into `~/.claude/.credentials.json` (mode `600`) and reads from that file on every refresh thereafter.
+3. In MeterBar, expand the **Claude Code** row and click **Check Again**. The first click triggers macOS's one-time consent prompt for the `Claude Code-credentials` keychain item — pick **Always Allow**. MeterBar copies the OAuth blob into `~/.claude/.credentials.json` (mode `600`) and reads from that file on every refresh thereafter.
 
-> After the initial Import, MeterBar reads the file copy on every refresh. When the access token gets close to expiry it silently re-reads the Keychain to pick up the new pair the `claude` CLI just wrote — no second prompt as long as you picked *Always Allow*. The section only falls back to *Not Connected* if `claude` hasn't been used recently enough to refresh the Keychain copy either; click Import again (or just run `claude` once) to recover. On Linux / non-keychain Claude Code installs, `~/.claude/.credentials.json` already exists and the import step is unnecessary.
+> After the initial Check Again, MeterBar reads the file copy on every refresh. When the access token gets close to expiry it silently re-reads the Keychain to pick up the new pair the `claude` CLI just wrote — no second prompt as long as you picked *Always Allow*. The section only falls back to *Not Connected* if `claude` hasn't been used recently enough to refresh the Keychain copy either; click Check Again (or just run `claude` once) to recover. On Linux / non-keychain Claude Code installs, `~/.claude/.credentials.json` already exists and the first click is a plain file read.
 
 ### Codex CLI
 
@@ -201,7 +201,7 @@ codex login    # For Codex CLI
 
 ### Claude Code shows "Not Connected" after `claude login`
 
-On macOS, Claude Code stores its OAuth token in the system Keychain by default — there's no `~/.claude/.credentials.json` file for MeterBar to read. Click **Import from Keychain** in the Claude Code row to copy the credentials into the file MeterBar reads (one-time, with a macOS consent prompt). If you'd rather do it manually:
+On macOS, Claude Code stores its OAuth token in the system Keychain by default — there's no `~/.claude/.credentials.json` file for MeterBar to read. Click **Check Again** in the Claude Code row to copy the credentials into the file MeterBar reads (one-time, with a macOS consent prompt — pick *Always Allow*). If you'd rather do it manually:
 ```bash
 security find-generic-password -s "Claude Code-credentials" -w > ~/.claude/.credentials.json
 chmod 600 ~/.claude/.credentials.json

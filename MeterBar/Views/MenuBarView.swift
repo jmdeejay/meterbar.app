@@ -487,40 +487,33 @@ struct ClaudeCodeServiceRow: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                HStack {
-                    Button(action: {
-                        importError = nil
-                        switch claudeCodeService.importCredentialsFromKeychain() {
-                        case .success:
-                            Task { await dataManager.refreshAll() }
-                        case .failure(let err):
+                // Single recovery button matching the Cursor/Codex rows. Tries
+                // the file copy first; if nothing's there, falls back to the
+                // Keychain bootstrap which fires the one-time consent prompt.
+                // Once a file copy exists, subsequent runs of the same button
+                // are pure file reads + a refresh.
+                Button(action: {
+                    importError = nil
+                    claudeCodeService.checkAccess()
+                    if !claudeCodeService.hasAccess {
+                        if case .failure(let err) = claudeCodeService.importCredentialsFromKeychain() {
                             if case .apiError(let msg) = err {
                                 importError = msg
                             } else {
                                 importError = "\(err)"
                             }
+                            return
                         }
-                    }) {
-                        HStack {
-                            Image(systemName: "key.fill")
-                            Text("Import from Keychain")
-                        }
-                        .font(.caption)
                     }
-                    .buttonStyle(.borderedProminent)
-
-                    Button(action: {
-                        claudeCodeService.checkAccess()
-                        Task { await dataManager.refreshAll() }
-                    }) {
-                        HStack {
-                            Image(systemName: "arrow.clockwise")
-                            Text("Check Again")
-                        }
-                        .font(.caption)
+                    Task { await dataManager.refreshAll() }
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Check Again")
                     }
-                    .buttonStyle(.bordered)
+                    .font(.caption)
                 }
+                .buttonStyle(.bordered)
 
                 if let msg = importError {
                     Text(msg)
