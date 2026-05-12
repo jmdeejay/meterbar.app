@@ -4,10 +4,19 @@ import Combine
 class ClaudeService {
     static let shared = ClaudeService()
 
-    private let authManager = AuthenticationManager.shared
+    private let authManager: AuthenticationManager
+    private let urlSession: URLSession
     private let baseURL = "https://api.anthropic.com"
 
-    private init() {}
+    private init() {
+        self.authManager = AuthenticationManager.shared
+        self.urlSession = URLSession.shared
+    }
+
+    init(authManager: AuthenticationManager, urlSession: URLSession) {
+        self.authManager = authManager
+        self.urlSession = urlSession
+    }
 
     func fetchUsageMetrics() async throws -> UsageMetrics {
         guard let adminKey = authManager.claudeAdminKey else {
@@ -43,7 +52,7 @@ class ClaudeService {
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await urlSession.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ServiceError.apiError("Invalid response")

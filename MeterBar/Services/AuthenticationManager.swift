@@ -8,9 +8,15 @@ class AuthenticationManager: ObservableObject {
     @Published var openaiAdminKey: String?
     // Note: Cursor doesn't need authentication since it has no API
 
-    private let keychain = KeychainManager.shared
+    private let keychain: KeychainBackend
 
     private init() {
+        self.keychain = KeychainManager.shared
+        loadCredentials()
+    }
+
+    init(keychain: KeychainBackend) {
+        self.keychain = keychain
         loadCredentials()
     }
 

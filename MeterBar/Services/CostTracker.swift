@@ -17,7 +17,17 @@ class CostTracker: ObservableObject {
         "default": TokenPricing(input: 3.0, output: 15.0, cacheCreation: 3.75, cacheRead: 0.30)
     ]
 
-    private init() {}
+    private let claudeProjectsDirectory: URL
+
+    private init() {
+        self.claudeProjectsDirectory = URL(fileURLWithPath: RealHome.path)
+            .appendingPathComponent(".claude")
+            .appendingPathComponent("projects")
+    }
+
+    init(claudeProjectsDirectory: URL) {
+        self.claudeProjectsDirectory = claudeProjectsDirectory
+    }
 
     func scanCosts(days: Int = 30) async {
         isScanning = true
@@ -45,9 +55,7 @@ class CostTracker: ObservableObject {
     }
 
     private func scanClaudeCodeSessions(since cutoffDate: Date) async -> TokenCost? {
-        let claudeDir = URL(fileURLWithPath: RealHome.path)
-            .appendingPathComponent(".claude")
-            .appendingPathComponent("projects")
+        let claudeDir = claudeProjectsDirectory
 
         guard FileManager.default.fileExists(atPath: claudeDir.path) else {
             return nil

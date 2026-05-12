@@ -14,21 +14,30 @@ class CursorLocalService: ObservableObject {
     private let usageSummaryEndpoint = "https://cursor.com/api/usage-summary"
     private let getMeEndpoint = "https://cursor.com/api/dashboard/get-me"
 
-    // URLSession with timeout configuration
-    private lazy var urlSession: URLSession = {
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 30.0
-        configuration.timeoutIntervalForResource = 60.0
-        configuration.waitsForConnectivity = true
-        return URLSession(configuration: configuration)
-    }()
+    private let urlSession: URLSession
+    private let authResolverOverride: ((Bool) -> (userId: String, token: String)?)?
 
     @Published private(set) var hasAccess: Bool = false
     @Published private(set) var subscriptionType: String?
     @Published private(set) var lastError: ServiceError?
 
     private init() {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 30.0
+        configuration.timeoutIntervalForResource = 60.0
+        configuration.waitsForConnectivity = true
+        self.urlSession = URLSession(configuration: configuration)
+        self.authResolverOverride = nil
         // Check if we have Cursor credentials on init
+        checkAccess()
+    }
+
+    init(
+        urlSession: URLSession,
+        authResolver: @escaping (Bool) -> (userId: String, token: String)?
+    ) {
+        self.urlSession = urlSession
+        self.authResolverOverride = authResolver
         checkAccess()
     }
 
@@ -123,6 +132,7 @@ class CursorLocalService: ObservableObject {
     /// Read access token from Cursor's SQLite database
     /// - Parameter forceRescan: If true, will recursively search for database if not found in primary paths
     func getAccessTokenFromDatabase(forceRescan: Bool = false) -> (userId: String, token: String)? {
+        if let override = authResolverOverride { return override(forceRescan) }
         guard let dbPath = getCursorDatabasePath(forceRescan: forceRescan) else {
             if forceRescan {
                 print("[CursorLocalService] Database not found after rescanning all paths")

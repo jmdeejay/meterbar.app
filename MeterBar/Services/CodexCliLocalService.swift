@@ -16,42 +16,41 @@ class CodexCliLocalService: ObservableObject {
     // API endpoint for Codex CLI usage
     private let usageEndpoint = "https://chatgpt.com/backend-api/wham/usage"
 
+    private let homeDirectory: String
+    private let urlSession: URLSession
+
     // Path to Codex CLI auth file
     private var authFilePath: String {
-        let homeDir = getRealHomeDirectory()
-        return "\(homeDir)/.codex/auth.json"
+        return "\(homeDirectory)/.codex/auth.json"
     }
-
-    /// Get the REAL home directory (not sandboxed container)
-    private func getRealHomeDirectory() -> String {
-        // In sandboxed apps, FileManager.homeDirectoryForCurrentUser returns the container path
-        // We need the actual user home directory to access Codex CLI's auth file
-        if let pw = getpwuid(getuid()) {
-            return String(cString: pw.pointee.pw_dir)
-        }
-        // Fallback to environment variable
-        if let home = ProcessInfo.processInfo.environment["HOME"] {
-            return home
-        }
-        // Last resort - this will be sandboxed but better than nothing
-        return FileManager.default.homeDirectoryForCurrentUser.path
-    }
-
-    // URLSession with timeout configuration
-    private lazy var urlSession: URLSession = {
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 30.0
-        configuration.timeoutIntervalForResource = 60.0
-        configuration.waitsForConnectivity = true
-        return URLSession(configuration: configuration)
-    }()
 
     @Published private(set) var hasAccess: Bool = false
     @Published private(set) var lastError: ServiceError?
     @Published private(set) var subscriptionType: String?
 
     private init() {
-        // Check if we have Codex CLI credentials on init
+        // In sandboxed apps, FileManager.homeDirectoryForCurrentUser returns the container path.
+        // getpwuid(getuid()) returns the actual user home so we can read Codex CLI's auth file.
+        if let pw = getpwuid(getuid()) {
+            self.homeDirectory = String(cString: pw.pointee.pw_dir)
+        } else if let home = ProcessInfo.processInfo.environment["HOME"] {
+            self.homeDirectory = home
+        } else {
+            self.homeDirectory = FileManager.default.homeDirectoryForCurrentUser.path
+        }
+
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 30.0
+        configuration.timeoutIntervalForResource = 60.0
+        configuration.waitsForConnectivity = true
+        self.urlSession = URLSession(configuration: configuration)
+
+        checkAccess()
+    }
+
+    init(homeDirectory: String, urlSession: URLSession) {
+        self.homeDirectory = homeDirectory
+        self.urlSession = urlSession
         checkAccess()
     }
 

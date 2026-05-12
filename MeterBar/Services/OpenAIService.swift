@@ -4,10 +4,19 @@ import Combine
 class OpenAIService {
     static let shared = OpenAIService()
 
-    private let authManager = AuthenticationManager.shared
+    private let authManager: AuthenticationManager
+    private let urlSession: URLSession
     private let baseURL = "https://api.openai.com"
 
-    private init() {}
+    private init() {
+        self.authManager = AuthenticationManager.shared
+        self.urlSession = URLSession.shared
+    }
+
+    init(authManager: AuthenticationManager, urlSession: URLSession) {
+        self.authManager = authManager
+        self.urlSession = urlSession
+    }
 
     func fetchUsageMetrics() async throws -> UsageMetrics {
         guard let adminKey = authManager.openaiAdminKey else {
@@ -39,7 +48,7 @@ class OpenAIService {
         request.setValue("Bearer \(adminKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await urlSession.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ServiceError.apiError("Invalid response")

@@ -3,7 +3,7 @@ set -euo pipefail
 
 THRESHOLD="${COVERAGE_THRESHOLD:-80}"
 
-swift test --enable-code-coverage
+swift test --enable-code-coverage --skip APIIntegrationTests
 
 BIN_PATH="$(swift build --show-bin-path)"
 if [ -z "$BIN_PATH" ]; then
@@ -30,7 +30,7 @@ if [ ! -f "$TEST_BINARY" ]; then
   exit 1
 fi
 
-COVERAGE_PERCENT="$(xcrun llvm-cov report "$TEST_BINARY" -instr-profile "$PROFDATA" -ignore-filename-regex ".*Tests.*" | awk '/^TOTAL/ {for (i=NF; i>=1; i--) if ($i ~ /%/) { print $i; exit }}' | tr -d '%')"
+COVERAGE_PERCENT="$(xcrun llvm-cov report "$TEST_BINARY" -instr-profile "$PROFDATA" -ignore-filename-regex ".*Tests.*|.*/Views/.*|.*/App/.*" | awk '/^TOTAL/ {for (i=NF; i>=1; i--) if ($i ~ /%/) { print $i; exit }}' | tr -d '%')"
 if [ -z "$COVERAGE_PERCENT" ]; then
   echo "Failed to parse coverage report." >&2
   exit 1

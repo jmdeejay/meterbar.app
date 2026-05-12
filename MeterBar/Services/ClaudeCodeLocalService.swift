@@ -25,14 +25,9 @@ class ClaudeCodeLocalService: ObservableObject {
     // Working endpoint (discovered via testing)
     private let usageEndpoint = "https://api.anthropic.com/api/oauth/usage"
 
-    // URLSession with timeout configuration
-    private lazy var urlSession: URLSession = {
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 30.0
-        configuration.timeoutIntervalForResource = 60.0
-        configuration.waitsForConnectivity = true
-        return URLSession(configuration: configuration)
-    }()
+    private let urlSession: URLSession
+    private let homeDirectory: String
+    private let keychainReaderOverride: (() -> Result<Data, ServiceError>)?
 
     @Published private(set) var hasAccess: Bool = false
     @Published private(set) var subscriptionType: String?
@@ -40,12 +35,30 @@ class ClaudeCodeLocalService: ObservableObject {
     @Published private(set) var lastError: ServiceError?
 
     private init() {
+        self.homeDirectory = RealHome.path
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 30.0
+        configuration.timeoutIntervalForResource = 60.0
+        configuration.waitsForConnectivity = true
+        self.urlSession = URLSession(configuration: configuration)
+        self.keychainReaderOverride = nil
+        applySnapshot(currentSnapshot())
+    }
+
+    init(
+        homeDirectory: String,
+        urlSession: URLSession,
+        keychainReader: (() -> Result<Data, ServiceError>)? = nil
+    ) {
+        self.homeDirectory = homeDirectory
+        self.urlSession = urlSession
+        self.keychainReaderOverride = keychainReader
         applySnapshot(currentSnapshot())
     }
 
     // MARK: - Local Credential Resolution
 
-    private func getRealHomeDirectory() -> String { RealHome.path }
+    private func getRealHomeDirectory() -> String { homeDirectory }
 
     /// Pure: read `~/.claude/` and return a credential snapshot (or nil if none of the local
     /// files can supply a bearer token). Does not mutate published state.
@@ -82,6 +95,7 @@ class ClaudeCodeLocalService: ObservableObject {
     /// has gone stale (and even then, only if the Keychain has actually
     /// progressed past the file's `expiresAt`).
     private func readKeychainBlob() -> Result<Data, ServiceError> {
+        if let override = keychainReaderOverride { return override() }
         let query: [String: Any] = [
             kSecClass as String:        kSecClassGenericPassword,
             kSecAttrService as String:  "Claude Code-credentials",

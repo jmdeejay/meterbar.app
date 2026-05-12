@@ -20,21 +20,52 @@ class UsageDataManager: ObservableObject {
         }
     }
 
-    private let claudeService = ClaudeService.shared
-    private let claudeCodeService = ClaudeCodeLocalService.shared
-    private let cursorService = CursorLocalService.shared
-    private let openaiService = OpenAIService.shared
-    private let codexCliService = CodexCliLocalService.shared
-    private let authManager = AuthenticationManager.shared
+    private let claudeService: ClaudeService
+    private let claudeCodeService: ClaudeCodeLocalService
+    private let cursorService: CursorLocalService
+    private let openaiService: OpenAIService
+    private let codexCliService: CodexCliLocalService
+    private let authManager: AuthenticationManager
 
     private var refreshTimer: Timer?
     // v2: UsageMetrics shape changed from `sessionLimit/weeklyLimit/codeReviewLimit`
     // triplets to an ordered `[UsageLimit]` array (each carrying its own label).
     // Bumping the key invalidates v1 caches instead of failing to decode them.
     private let cacheKey = "cached_usage_metrics_v2"
-    private let sharedStore = SharedDataStore.shared
+    private let sharedStore: SharedDataStore
+    private let userDefaults: UserDefaults
 
     private init() {
+        self.claudeService = ClaudeService.shared
+        self.claudeCodeService = ClaudeCodeLocalService.shared
+        self.cursorService = CursorLocalService.shared
+        self.openaiService = OpenAIService.shared
+        self.codexCliService = CodexCliLocalService.shared
+        self.authManager = AuthenticationManager.shared
+        self.sharedStore = SharedDataStore.shared
+        self.userDefaults = .standard
+        loadCachedData()
+        setupAutoRefresh()
+    }
+
+    init(
+        claudeService: ClaudeService,
+        claudeCodeService: ClaudeCodeLocalService,
+        cursorService: CursorLocalService,
+        openaiService: OpenAIService,
+        codexCliService: CodexCliLocalService,
+        authManager: AuthenticationManager,
+        sharedStore: SharedDataStore,
+        userDefaults: UserDefaults = .standard
+    ) {
+        self.claudeService = claudeService
+        self.claudeCodeService = claudeCodeService
+        self.cursorService = cursorService
+        self.openaiService = openaiService
+        self.codexCliService = codexCliService
+        self.authManager = authManager
+        self.sharedStore = sharedStore
+        self.userDefaults = userDefaults
         loadCachedData()
         setupAutoRefresh()
     }
@@ -237,7 +268,7 @@ class UsageDataManager: ObservableObject {
     }
 
     private func loadCachedData() {
-        guard let data = UserDefaults.standard.data(forKey: cacheKey),
+        guard let data = userDefaults.data(forKey: cacheKey),
               let decoded = try? JSONDecoder().decode([String: UsageMetrics].self, from: data) else {
             return
         }
@@ -251,7 +282,7 @@ class UsageDataManager: ObservableObject {
     
     /// Load cached metrics from disk without modifying instance state
     private func loadCachedMetricsFromDisk() -> [ServiceType: UsageMetrics] {
-        guard let data = UserDefaults.standard.data(forKey: cacheKey),
+        guard let data = userDefaults.data(forKey: cacheKey),
               let decoded = try? JSONDecoder().decode([String: UsageMetrics].self, from: data) else {
             return [:]
         }
@@ -269,7 +300,7 @@ class UsageDataManager: ObservableObject {
         }
 
         if let data = try? JSONEncoder().encode(encoded) {
-            UserDefaults.standard.set(data, forKey: cacheKey)
+            userDefaults.set(data, forKey: cacheKey)
         }
     }
 

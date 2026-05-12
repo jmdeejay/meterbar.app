@@ -60,4 +60,26 @@ final class ServiceTypeTests: XCTestCase {
         let cursor = try decoder.decode(ServiceType.self, from: cursorJSON)
         XCTAssertEqual(cursor, .cursor)
     }
+
+    // MARK: - brandColor
+
+    func testBrandColorClaudeAndClaudeCodeShareColor() {
+        XCTAssertEqual(ServiceType.claude.brandColor, ServiceType.claudeCode.brandColor)
+    }
+
+    func testBrandColorOpenAIAndCodexCliShareColor() {
+        XCTAssertEqual(ServiceType.openai.brandColor, ServiceType.codexCli.brandColor)
+    }
+
+    func testBrandColorClaudeAndOpenAIDiffer() {
+        XCTAssertNotEqual(ServiceType.claude.brandColor, ServiceType.openai.brandColor)
+    }
+
+    func testBrandColorClaudeAndCursorDiffer() {
+        XCTAssertNotEqual(ServiceType.claude.brandColor, ServiceType.cursor.brandColor)
+    }
+
+    func testBrandColorOpenAIAndCursorDiffer() {
+        XCTAssertNotEqual(ServiceType.openai.brandColor, ServiceType.cursor.brandColor)
+    }
 }

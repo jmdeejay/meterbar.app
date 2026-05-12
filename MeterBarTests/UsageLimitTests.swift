@@ -38,4 +38,40 @@ final class UsageLimitTests: XCTestCase {
         XCTAssertFalse(nearLimit.isAtLimit)
         XCTAssertEqual(nearLimit.statusColor, .warning)
     }
+
+    // MARK: - Codable round-trip
+
+    func testCodableRoundTripPreservesFields() throws {
+        let reset = Date(timeIntervalSince1970: 1_700_000_000)
+        let original = UsageLimit(
+            compactLabel: "S",
+            verboseLabel: "Session (5h)",
+            used: 42.5,
+            total: 100,
+            resetTime: reset
+        )
+
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(UsageLimit.self, from: encoded)
+
+        XCTAssertEqual(decoded.compactLabel, original.compactLabel)
+        XCTAssertEqual(decoded.verboseLabel, original.verboseLabel)
+        XCTAssertEqual(decoded.used, original.used, accuracy: 0.001)
+        XCTAssertEqual(decoded.total, original.total, accuracy: 0.001)
+        XCTAssertEqual(decoded.resetTime, original.resetTime)
+    }
+
+    // MARK: - UsageStatus.color
+
+    func testUsageStatusColorsAreDistinct() {
+        XCTAssertNotEqual(UsageStatus.good.color, UsageStatus.warning.color)
+        XCTAssertNotEqual(UsageStatus.warning.color, UsageStatus.critical.color)
+        XCTAssertNotEqual(UsageStatus.good.color, UsageStatus.critical.color)
+    }
+
+    func testUsageStatusColorIsStableForEachCase() {
+        XCTAssertEqual(UsageStatus.good.color, UsageStatus.good.color)
+        XCTAssertEqual(UsageStatus.warning.color, UsageStatus.warning.color)
+        XCTAssertEqual(UsageStatus.critical.color, UsageStatus.critical.color)
+    }
 }
